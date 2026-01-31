@@ -10,6 +10,7 @@ import { ScanSyncButtonWrapper } from '@/components/admin/scan-sync-button-wrapp
 import type { Database } from '@/types/database'
 
 type Album = Database['public']['Tables']['albums']['Row']
+type Photo = Database['public']['Tables']['photos']['Row']
 
 interface AlbumDetailPageProps {
   params: Promise<{ id: string }>
@@ -48,7 +49,7 @@ export default async function AlbumDetailPage({ params }: AlbumDetailPageProps) 
     .order('sort_order', { ascending: true })
     .execute()
 
-  const photos = photosResult.data || []
+  const photos = (photosResult.data || []) as Photo[]
 
   // 统计已完成的照片数量（用于显示，排除已删除的照片）
   const photoCountResult = await db
