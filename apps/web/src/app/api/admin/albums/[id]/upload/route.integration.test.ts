@@ -1,19 +1,22 @@
 /**
  * 上传凭证 API 集成测试
  * 
- * 这些测试使用真实的依赖（如 Supabase 客户端），测试多个模块的协作。
+ * 这些测试使用真实的依赖（如数据库客户端），测试多个模块的协作。
  * 
  * 注意：集成测试需要真实的环境配置，通常需要：
- * - 测试数据库实例
- * - 测试 Supabase 项目
+ * - 测试数据库实例（PostgreSQL 或 Supabase）
  * - 测试 MinIO 实例
  * 
  * 运行集成测试：
  * ```bash
  * # 设置测试环境变量
  * export RUN_INTEGRATION_TESTS=true
- * export SUPABASE_URL="your-test-supabase-url"
- * export SUPABASE_SERVICE_ROLE_KEY="your-test-key"
+ * export DATABASE_TYPE=postgresql  # 或 supabase
+ * export DATABASE_HOST=localhost
+ * export DATABASE_PORT=5432
+ * export DATABASE_NAME=test_pis
+ * export DATABASE_USER=test_user
+ * export DATABASE_PASSWORD=test_password
  * 
  * # 运行集成测试
  * pnpm test -- route.integration.test.ts
@@ -23,7 +26,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest'
 import { POST } from './route'
 import { createMockRequest } from '@/test/test-utils'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/database'
 import { createTestAlbum, deleteTestAlbum, deleteTestPhotos } from '@/test/integration-helpers'
 
 // 标记为集成测试，可以通过环境变量控制是否运行
@@ -44,11 +47,11 @@ global.fetch = vi.fn()
 describe.skipIf(!shouldRunIntegrationTests)('POST /api/admin/albums/[id]/upload (Integration)', () => {
   let testAlbumId: string
   let testUserId: string
-  let adminClient: ReturnType<typeof createAdminClient>
+  let adminClient: Awaited<ReturnType<typeof createAdminClient>>
   const createdPhotoIds: string[] = []
 
   beforeAll(async () => {
-    adminClient = createAdminClient()
+    adminClient = await createAdminClient()
     
     // 使用辅助函数创建测试相册
     const album = await createTestAlbum({
@@ -95,7 +98,7 @@ describe.skipIf(!shouldRunIntegrationTests)('POST /api/admin/albums/[id]/upload 
     })
 
     // Mock 认证
-    vi.spyOn(await import('@/lib/supabase/server'), 'createClientFromRequest').mockReturnValue({
+    vi.spyOn(await import('@/lib/database'), 'createClientFromRequest').mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
           data: { user: { id: testUserId, email: 'test@example.com' } },
@@ -203,7 +206,7 @@ describe.skipIf(!shouldRunIntegrationTests)('POST /api/admin/albums/[id]/upload 
     })
 
     // Mock 认证
-    vi.spyOn(await import('@/lib/supabase/server'), 'createClientFromRequest').mockReturnValue({
+    vi.spyOn(await import('@/lib/database'), 'createClientFromRequest').mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
           data: { user: { id: testUserId, email: 'test@example.com' } },
@@ -240,7 +243,7 @@ describe.skipIf(!shouldRunIntegrationTests)('POST /api/admin/albums/[id]/upload 
     })
 
     // Mock 认证
-    vi.spyOn(await import('@/lib/supabase/server'), 'createClientFromRequest').mockReturnValue({
+    vi.spyOn(await import('@/lib/database'), 'createClientFromRequest').mockResolvedValue({
       auth: {
         getUser: vi.fn().mockResolvedValue({
           data: { user: { id: testUserId, email: 'test@example.com' } },

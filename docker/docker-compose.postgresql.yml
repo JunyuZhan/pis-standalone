@@ -1,10 +1,18 @@
 version: '3.8'
 
 # ============================================
-# PIS 部署配置 - PostgreSQL 版本
+# PIS 部署配置 - PostgreSQL 版本（仅 Worker + 存储）
+# 
+# ⚠️  注意：此文件用于仅部署 Worker 和存储服务的场景
+# 推荐使用 docker-compose.standalone.yml 进行完全自托管部署
 # 
 # 端口: MinIO 19000/19001, PostgreSQL 15432, Redis 16379, Worker 3001
 # 网络模式: WORKER_BIND_HOST=127.0.0.1(内网) 或 0.0.0.0(公网)
+# 
+# 使用场景：
+# - 仅需要 Worker 和存储服务
+# - Web 前端部署在其他地方（如 Vercel）
+# - 数据库使用外部 PostgreSQL（非 Docker 容器）
 # ============================================
 
 networks:
@@ -26,6 +34,8 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - pis_postgresql_data:/var/lib/postgresql/data
+      # 数据库初始化脚本（首次启动时自动执行）
+      - ./init-postgresql-db.sql:/docker-entrypoint-initdb.d/init-postgresql-db.sql:ro
     restart: unless-stopped
     networks:
       - pis-network

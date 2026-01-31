@@ -24,7 +24,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createClientFromRequest } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 
 // 配置路由超时时间（Vercel 默认 10 秒，分片上传需要更长时间）
 // 分片上传可能需要 5 分钟，设置为 300 秒
@@ -195,9 +195,7 @@ async function proxyRequest(
     // 添加认证检查（除了 health 端点）
     // health 端点用于监控，不需要认证
     if (pathSegments[0] !== 'health') {
-      const response = new NextResponse()
-      const supabase = createClientFromRequest(request, response)
-      const { data: { user } } = await supabase.auth.getUser()
+      const user = await getCurrentUser(request)
       
       if (!user) {
         return NextResponse.json(

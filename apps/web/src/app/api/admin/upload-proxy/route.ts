@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClientFromRequest } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { uploadProxyQuerySchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 上传代理 API
@@ -9,24 +11,17 @@ import { createClientFromRequest } from '@/lib/supabase/server'
 export async function PUT(request: NextRequest) {
   try {
     // 验证登录状态
-    const response = NextResponse.next({ request })
-    const supabase = createClientFromRequest(request, response)
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 获取上传 key
+    // 获取并验证上传 key
     const key = request.nextUrl.searchParams.get('key')
-    if (!key) {
-      return NextResponse.json(
-        { error: { code: 'MISSING_KEY', message: '缺少 key 参数' } },
-        { status: 400 }
-      )
+    const queryValidation = safeValidate(uploadProxyQuerySchema, { key })
+    if (!queryValidation.success) {
+      return handleError(queryValidation.error, '缺少或无效的 key 参数')
     }
 
     // 获取 Content-Type
@@ -38,11 +33,10 @@ export async function PUT(request: NextRequest) {
 
     // 转发到远程 Worker
     const workerUrl = process.env.WORKER_API_URL || process.env.NEXT_PUBLIC_WORKER_URL || 'http://localhost:3001'
-    const uploadUrl = `${workerUrl}/api/upload?key=${encodeURIComponent(key)}`
     
     // 记录上传请求信息（用于调试）
     console.log('[Upload Proxy] Forwarding upload:', {
-      key,
+      key: queryValidation.data.key,
       fileSize,
       contentType,
       workerUrl,
@@ -71,7 +65,8 @@ export async function PUT(request: NextRequest) {
       }
       
       // 使用流式传输：直接将请求体流式转发到 Worker
-      const workerResponse = await fetch(uploadUrl, {
+      const uploadUrlWithKey = `${workerUrl}/api/upload?key=${encodeURIComponent(queryValidation.data.key)}`
+      const workerResponse = await fetch(uploadUrlWithKey, {
         method: 'PUT',
         headers,
         body: request.body, // 直接使用请求体流，不读取到内存
@@ -83,10 +78,7 @@ export async function PUT(request: NextRequest) {
       if (!workerResponse.ok) {
         const errorText = await workerResponse.text()
         console.error('Worker upload failed:', workerResponse.status, errorText)
-        return NextResponse.json(
-          { error: { code: 'UPLOAD_FAILED', message: `上传失败: ${workerResponse.status}` } },
-          { status: workerResponse.status }
-        )
+        return ApiError.internal(`上传失败: ${workerResponse.status}`)
       }
 
       const result = await workerResponse.json()
@@ -133,7 +125,7 @@ export async function PUT(request: NextRequest) {
       // 返回成功，因为文件可能已经上传
       return NextResponse.json({ 
         success: true, 
-        key,
+        key: queryValidation.data.key,
         warning: 'Upload response timeout, but file may have been uploaded successfully'
       })
     }
@@ -144,10 +136,7 @@ export async function PUT(request: NextRequest) {
       error: errorMessage,
       stack: err instanceof Error ? err.stack : undefined,
     })
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误', details: errorMessage } },
-      { status: 500 }
-    )
+    return handleError(err, '上传代理失败')
   }
 }
 

@@ -80,10 +80,10 @@ PIS 采用前后端分离的微服务架构，主要包含以下组件：
 │  └─────────────────┘               │                            │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │              Supabase Cloud (PostgreSQL)                │  │
+│  │              PostgreSQL (自托管)                         │  │
 │  │  • 数据库存储                                            │  │
-│  │  • 用户认证                                              │  │
-│  │  • Realtime 订阅                                         │  │
+│  │  • 用户认证（自定义 JWT）                                 │  │
+│  │  • 完全自托管                                            │  │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -108,7 +108,8 @@ PIS 采用前后端分离的微服务架构，主要包含以下组件：
 - **存储**: MinIO Client (S3 兼容)
 
 ### 数据库
-- **主数据库**: Supabase (PostgreSQL)
+- **主数据库**: PostgreSQL (自托管)
+- **认证**: 自定义 JWT + HttpOnly Cookie
 - **缓存/队列**: Redis 7
 
 ### 存储
@@ -246,9 +247,16 @@ customDomains = ["minio.example.com"]
 
 ```bash
 # ==================== 数据库配置 ====================
-NEXT_PUBLIC_SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+DATABASE_TYPE=postgresql
+DATABASE_HOST=postgres.example.com
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=your-secure-password
+DATABASE_SSL=true
+
+# ==================== 认证配置 ====================
+AUTH_JWT_SECRET=your-jwt-secret-key-at-least-32-characters-long
 
 # ==================== 媒体服务器配置 ====================
 # 前端访问媒体服务器的公网 URL (通过 frpc 代理)
@@ -282,8 +290,16 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 
 ```bash
 # ==================== 数据库配置 ====================
-SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+DATABASE_TYPE=postgresql
+DATABASE_HOST=postgres                    # Docker Compose 服务名
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=AUTO_GENERATE           # 由部署脚本自动生成
+DATABASE_SSL=false                        # Docker 内部网络不需要 SSL
+
+# ==================== 认证配置 ====================
+AUTH_JWT_SECRET=AUTO_GENERATE_32         # 由部署脚本自动生成
 
 # ==================== MinIO 存储配置 ====================
 # Worker 使用 Docker 内部网络连接 MinIO
@@ -325,11 +341,18 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 
 ```bash
 # ==================== 数据库配置 ====================
-DATABASE_TYPE=supabase
-NEXT_PUBLIC_SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
+DATABASE_TYPE=postgresql
+
+# PostgreSQL 连接配置（本地开发）
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=your-local-password
+DATABASE_SSL=false
+
+# ==================== 认证配置 ====================
+AUTH_JWT_SECRET=local-dev-secret-key-change-in-production
 
 # ==================== 存储配置 ====================
 # 本地开发: 使用公网 URL 或本地 MinIO
@@ -392,7 +415,7 @@ Worker (192.168.50.10:3001)
   ↓
   ├─→ Redis (队列任务)
   ├─→ MinIO (上传原图)
-  └─→ Supabase (更新数据库)
+  └─→ PostgreSQL (更新数据库)
   
 Worker 处理完成后:
   ↓ HTTP PUT (Docker 网络)
@@ -432,7 +455,7 @@ Worker 处理
   │   ├─→ 生成缩略图
   │   └─→ 生成预览图
   ├─→ 上传处理结果 (MinIO)
-  └─→ 更新数据库 (Supabase)
+  └─→ 更新数据库 (PostgreSQL)
 ```
 
 ---
@@ -477,7 +500,7 @@ PIS/
 │       └── media.conf              # Nginx 配置示例
 │
 ├── database/
-│   └── full_schema.sql             # 数据库架构
+│   └── init-postgresql-db.sql      # 数据库架构
 │
 ├── scripts/                         # 部署和维护脚本
 │   ├── deploy.sh                   # 一键部署脚本
@@ -516,7 +539,7 @@ PIS/
    用户 → Cloudflare CDN → frpc → MinIO → 返回图片
    
 4. 删除阶段
-   用户删除 → Vercel API → Supabase (软删除)
+   用户删除 → Vercel API → PostgreSQL (软删除)
    ↓
    Worker 定时任务 (30天后)
    ├─→ 删除 MinIO 文件

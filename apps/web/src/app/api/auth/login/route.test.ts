@@ -8,17 +8,18 @@ import { createMockRequest } from '@/test/test-utils'
 import { checkRateLimit } from '@/middleware-rate-limit'
 
 // Mock dependencies
-vi.mock('@/lib/supabase/server', () => {
-  const mockAuth = {
-    signInWithPassword: vi.fn(),
-    getUser: vi.fn(),
-  }
+vi.mock('@/lib/database', () => {
+  const { createMockDatabaseClient } = require('@/test/test-utils')
   return {
-    createClient: vi.fn().mockResolvedValue({
-      auth: mockAuth,
-    }),
+    createClient: vi.fn().mockResolvedValue(createMockDatabaseClient()),
   }
 })
+
+vi.mock('@/lib/auth', () => ({
+  getAuthDatabase: vi.fn(),
+  verifyPassword: vi.fn(),
+  createSession: vi.fn(),
+}))
 
 vi.mock('@/middleware-rate-limit', () => ({
   checkRateLimit: vi.fn(),
@@ -100,11 +101,20 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should extract IP from Cloudflare header', async () => {
-    const { createClient } = await import('@/lib/supabase/server')
-    const mockClient = await createClient()
-    vi.mocked(mockClient.auth.signInWithPassword).mockResolvedValue({
-      data: { user: { id: '1', email: 'test@example.com' }, session: null },
-      error: null,
+    const { getAuthDatabase, verifyPassword, createSession } = await import('@/lib/auth')
+    vi.mocked(getAuthDatabase).mockReturnValue({
+      findUserByEmail: vi.fn().mockResolvedValue({
+        id: '1',
+        email: 'test@example.com',
+        password_hash: 'hashed-password',
+      }),
+    } as any)
+    vi.mocked(verifyPassword).mockResolvedValue(true)
+    vi.mocked(createSession).mockResolvedValue({
+      access_token: 'token',
+      refresh_token: 'refresh',
+      expires_at: Date.now() + 3600,
+      user: { id: '1', email: 'test@example.com' },
     })
 
     const request = createMockRequest('http://localhost:3000/api/auth/login', {
@@ -129,11 +139,20 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should extract IP from x-forwarded-for header', async () => {
-    const { createClient } = await import('@/lib/supabase/server')
-    const mockClient = await createClient()
-    vi.mocked(mockClient.auth.signInWithPassword).mockResolvedValue({
-      data: { user: { id: '1', email: 'test@example.com' }, session: null },
-      error: null,
+    const { getAuthDatabase, verifyPassword, createSession } = await import('@/lib/auth')
+    vi.mocked(getAuthDatabase).mockReturnValue({
+      findUserByEmail: vi.fn().mockResolvedValue({
+        id: '1',
+        email: 'test@example.com',
+        password_hash: 'hashed-password',
+      }),
+    } as any)
+    vi.mocked(verifyPassword).mockResolvedValue(true)
+    vi.mocked(createSession).mockResolvedValue({
+      access_token: 'token',
+      refresh_token: 'refresh',
+      expires_at: Date.now() + 3600,
+      user: { id: '1', email: 'test@example.com' },
     })
 
     const request = createMockRequest('http://localhost:3000/api/auth/login', {
@@ -158,12 +177,11 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should handle login failure', async () => {
-    const { createClient } = await import('@/lib/supabase/server')
-    const mockClient = await createClient()
-    vi.mocked(mockClient.auth.signInWithPassword).mockResolvedValue({
-      data: { user: null, session: null },
-      error: { message: 'Invalid credentials', status: 400 },
-    })
+    const { getAuthDatabase, verifyPassword } = await import('@/lib/auth')
+    vi.mocked(getAuthDatabase).mockReturnValue({
+      findUserByEmail: vi.fn().mockResolvedValue(null),
+    } as any)
+    vi.mocked(verifyPassword).mockResolvedValue(false)
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
@@ -187,12 +205,11 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should handle short email in error logging', async () => {
-    const { createClient } = await import('@/lib/supabase/server')
-    const mockClient = await createClient()
-    vi.mocked(mockClient.auth.signInWithPassword).mockResolvedValue({
-      data: { user: null, session: null },
-      error: { message: 'Invalid credentials', status: 400 },
-    })
+    const { getAuthDatabase, verifyPassword } = await import('@/lib/auth')
+    vi.mocked(getAuthDatabase).mockReturnValue({
+      findUserByEmail: vi.fn().mockResolvedValue(null),
+    } as any)
+    vi.mocked(verifyPassword).mockResolvedValue(false)
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 
@@ -216,7 +233,7 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should handle short email in success logging', async () => {
-    const { createClient } = await import('@/lib/supabase/server')
+    const { createClient } = await import('@/lib/database')
     const mockClient = await createClient()
     vi.mocked(mockClient.auth.signInWithPassword).mockResolvedValue({
       data: {
@@ -250,7 +267,7 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should handle internal errors', async () => {
-    const { createClient } = await import('@/lib/supabase/server')
+    const { createClient } = await import('@/lib/database')
     const mockClient = await createClient()
     vi.mocked(mockClient.auth.signInWithPassword).mockRejectedValue(
       new Error('Database connection failed')
@@ -278,7 +295,7 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should return success response with user data', async () => {
-    const { createClient } = await import('@/lib/supabase/server')
+    const { createClient } = await import('@/lib/database')
     const mockClient = await createClient()
     vi.mocked(mockClient.auth.signInWithPassword).mockResolvedValue({
       data: {

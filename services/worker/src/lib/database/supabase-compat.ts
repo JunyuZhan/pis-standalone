@@ -1,8 +1,8 @@
 /**
  * Supabase 兼容层
  * 
- * PIS 使用 Supabase 作为唯一数据库后端
- * 此文件提供与 Supabase Client 相同的 API 接口
+ * PIS Standalone 版本支持 Supabase（云端）和 PostgreSQL（自托管）两种数据库后端
+ * 此文件提供与 Supabase Client 相同的 API 接口，用于向后兼容和混合部署模式
  */
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
@@ -15,7 +15,7 @@ export interface SupabaseCompatConfig {
 
 /**
  * Supabase 兼容客户端
- * PIS 使用 Supabase 作为唯一数据库后端
+ * 用于向后兼容和混合部署模式（Vercel + Supabase）
  */
 export class SupabaseCompatClient {
   private supabaseClient: SupabaseClient;
@@ -64,7 +64,7 @@ export class SupabaseCompatClient {
 
 /**
  * 从环境变量创建 Supabase 兼容客户端
- * PIS 使用 Supabase 作为唯一数据库后端
+ * 用于向后兼容和混合部署模式（Vercel + Supabase）
  */
 export function createSupabaseCompatClient(): SupabaseCompatClient {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;

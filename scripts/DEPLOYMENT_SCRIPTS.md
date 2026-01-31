@@ -29,7 +29,7 @@ bash scripts/setup.sh
 **特点：**
 - 菜单式交互界面
 - 自动检查依赖
-- 支持多种数据库类型（Supabase/PostgreSQL/MySQL）
+- 支持多种数据库类型（PostgreSQL（推荐）/Supabase（向后兼容））
 
 ---
 
@@ -40,7 +40,7 @@ bash scripts/setup.sh
 **功能：**
 - ✅ 自动安装 Docker 和 Docker Compose
 - ✅ 克隆代码仓库
-- ✅ 选择数据库类型（Supabase/PostgreSQL/MySQL）
+- ✅ 选择数据库类型（PostgreSQL（推荐）/Supabase（向后兼容））
 - ✅ 选择网络模式（内网/公网）
 - ✅ 自动生成环境变量配置
 - ✅ 构建和启动所有服务
@@ -54,7 +54,7 @@ bash scripts/setup.sh
 **用法：**
 ```bash
 # 在服务器上直接运行
-curl -sSL https://raw.githubusercontent.com/junyuzhan/pis/main/scripts/deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/deploy.sh | bash
 
 # 在本地运行，远程部署
 bash scripts/deploy.sh <服务器IP> [用户名]
@@ -74,7 +74,7 @@ bash scripts/deploy.sh <服务器IP> [用户名]
 **功能：**
 - ✅ 选择部署方式（混合/半自托管/完全自托管）
 - ✅ 配置域名和 SSL
-- ✅ 配置 Supabase（可选）
+- ✅ 配置 PostgreSQL（推荐）或 Supabase（向后兼容）
 - ✅ 配置 PostgreSQL（自托管模式）
 - ✅ 配置 MinIO、Worker、告警等
 - ✅ 生成配置文件并启动服务
@@ -219,12 +219,14 @@ cd docker
 docker-compose up -d minio redis minio-init
 ```
 
-### 启动完整服务（Supabase 版本）
+### 启动完整服务（混合部署，Supabase 数据库）
 
 ```bash
 cd docker
 docker-compose up -d
 ```
+
+**注意**: 此模式需要单独部署前端到 Vercel，并配置 Supabase 数据库。
 
 ### 启动完整服务（PostgreSQL 版本）
 
@@ -281,12 +283,11 @@ docker-compose logs -f [服务名]
 
 ### 我需要什么 docker-compose 文件？
 
-| 数据库类型 | docker-compose 文件 |
-|-----------|-------------------|
-| Supabase（云数据库） | `docker-compose.yml` |
-| PostgreSQL（本地） | `docker-compose.postgresql.yml` |
-| MySQL（本地） | `docker-compose.mysql.yml` |
-| 完全自托管（所有服务） | `docker-compose.standalone.yml` |
+| 数据库类型 | docker-compose 文件 | 说明 |
+|-----------|-------------------|------|
+| PostgreSQL（推荐） | `docker-compose.standalone.yml` | 完全自托管，包含所有服务 |
+| PostgreSQL（仅 Worker） | `docker-compose.postgresql.yml` | 前端单独部署，数据库本地 |
+| Supabase（向后兼容） | `docker-compose.yml` | 前端部署到 Vercel，数据库使用 Supabase |
 
 ---
 
@@ -303,6 +304,7 @@ docker-compose logs -f [服务名]
 
 ## 📚 相关文档
 
-- [部署指南](../docs/i18n/en/DEPLOYMENT.md)
-- [开发指南](../docs/DEVELOPMENT.md)
-- [Standalone 部署指南](../docs/i18n/zh-CN/DEPLOYMENT_STANDALONE.md)
+- [部署指南](../docs/i18n/zh-CN/DEPLOYMENT.md) - 详细部署步骤
+- [部署指南 (English)](../docs/i18n/en/DEPLOYMENT.md) - Deployment guide
+- [开发指南](../docs/DEVELOPMENT.md) - 开发环境设置
+- [脚本工具集](./README.md) - 所有脚本的快速参考

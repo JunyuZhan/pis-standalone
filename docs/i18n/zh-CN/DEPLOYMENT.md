@@ -30,8 +30,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/JunyuZhan/pis-cloud.git
-cd pis
+git clone https://github.com/JunyuZhan/pis-standalone.git
+cd pis-standalone
 
 # 运行引导式部署（交互式）
 bash docker/deploy.sh
@@ -40,8 +40,8 @@ bash docker/deploy.sh
 **或从本地机器部署：**
 
 ```bash
-git clone https://github.com/JunyuZhan/pis-cloud.git
-cd pis
+git clone https://github.com/JunyuZhan/pis-standalone.git
+cd pis-standalone
 
 # 部署到远程服务器
 bash docker/deploy.sh <服务器IP> <SSH用户>
@@ -54,15 +54,15 @@ bash docker/deploy.sh <服务器IP> <SSH用户>
 
 | 模式 | 描述 | 适用场景 |
 |------|------|----------|
-| **混合模式** | Vercel（前端）+ Supabase（数据库）+ 您的服务器（存储/Worker） | 快速搭建，云端前端 |
-| **完全独立** | 全部服务容器化（PostgreSQL + MinIO + Redis + Web + Worker + Nginx） | 完全自托管，数据隐私 |
+| **完全独立**（推荐） | 全部服务容器化（PostgreSQL + MinIO + Redis + Web + Worker + Nginx） | 完全自托管，数据隐私 |
+| **混合模式**（可选） | Vercel（前端）+ Supabase（数据库）+ 您的服务器（存储/Worker） | 快速搭建，云端前端 |
 
 ### 部署流程
 
 ```
 步骤 1: 选择部署模式（混合 / 独立）
 步骤 2: 安装环境（Docker、Git）
-步骤 3: 配置数据库（Supabase URL / PostgreSQL 凭证）
+步骤 3: 配置数据库（PostgreSQL 凭证，或可选的 Supabase URL）
 步骤 4: 配置存储（MinIO / 云存储）
 步骤 5: 自动生成安全密钥
 步骤 6: 构建并启动服务
@@ -83,11 +83,26 @@ bash docker/deploy.sh <服务器IP> <SSH用户>
 
 | 类型 | 推荐用于 | 特性 |
 |------|---------|------|
-| **Supabase** | 混合部署 | 云端托管，包含认证 |
-| **PostgreSQL** | 独立部署 | 自托管，本地 Docker |
+| **PostgreSQL**（推荐） | 独立部署 | 自托管，本地 Docker，完全控制 |
+| **Supabase**（可选） | 混合部署 | 云端托管，包含认证，需要网络连接 |
 | **MySQL** | 独立部署 | 自托管，本地 Docker |
 
-### 获取 Supabase 凭证（混合模式）
+### PostgreSQL 配置（推荐）
+
+PostgreSQL 是默认和推荐的数据库选项，提供完全的数据控制：
+
+```bash
+# 数据库连接信息
+DATABASE_HOST=postgres          # Docker 服务名或主机地址
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=AUTO_GENERATE # 由部署脚本自动生成
+```
+
+### 获取 Supabase 凭证（可选，混合模式）
+
+如果选择混合模式，需要 Supabase 凭证：
 
 1. 访问 https://supabase.com/dashboard
 2. 选择项目 → **Settings** → **API**
@@ -120,8 +135,8 @@ https://yourdomain.com/media    # 媒体文件
    http://your-server-ip:9001
    ```
 
-2. **初始化数据库架构**（Supabase）：
-   ⚠️ **重要**：在 Supabase Dashboard → SQL Editor 中执行数据库迁移。
+2. **初始化数据库架构**（PostgreSQL）：
+   ⚠️ **重要**：在 PostgreSQL 数据库中执行数据库迁移脚本（`docker/init-postgresql-db.sql`）。
 
 3. **部署前端到 Vercel**：
    - 连接 GitHub 仓库
@@ -293,7 +308,7 @@ ss -tuln | grep -E ":(80|443|9000|9001|3001)"
 
 ```bash
 git clone https://github.com/your-username/pis.git
-cd pis
+cd pis-standalone
 pnpm install
 ```
 

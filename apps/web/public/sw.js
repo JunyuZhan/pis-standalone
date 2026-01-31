@@ -52,7 +52,7 @@ self.addEventListener('fetch', (event) => {
   // 跳过 API 请求
   if (url.pathname.startsWith('/api/')) return;
 
-  // 跳过 Supabase 请求
+  // 跳过 Supabase 请求（向后兼容，仅在混合模式下使用）
   if (url.hostname.includes('supabase')) return;
 
   // 跳过外部媒体服务器请求（NEXT_PUBLIC_MEDIA_URL）- 这些请求应该直接通过，不经过 Service Worker

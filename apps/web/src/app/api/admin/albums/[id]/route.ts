@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import type { AlbumUpdate } from '@/types/database'
+import { updateAlbumSchema, albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -8,403 +11,220 @@ interface RouteParams {
 
 /**
  * 单相册管理 API
- * - GET: 获取相册详情
- * - PATCH: 更新相册设置
- * - DELETE: 软删除相册
+ * 
+ * @route GET /api/admin/albums/[id]
+ * @route PATCH /api/admin/albums/[id]
+ * @route DELETE /api/admin/albums/[id]
+ * @description 相册详情、更新和删除接口
  */
 
-// GET /api/admin/albums/[id] - 获取相册详情
+/**
+ * 获取相册详情
+ * 
+ * @route GET /api/admin/albums/[id]
+ * @description 获取指定相册的详细信息
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @param {string} id - 相册ID（UUID格式）
+ * 
+ * @returns {Object} 200 - 成功返回相册详情
+ * @returns {Object} 200.data - 相册数据对象
+ * @returns {string} 200.data.id - 相册ID
+ * @returns {string} 200.data.title - 相册标题
+ * @returns {string} 200.data.slug - 相册标识
+ * @returns {number} 200.data.photo_count - 照片数量
+ * 
+ * @returns {Object} 400 - 请求参数错误（无效的相册ID）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 404 - 相册不存在
+ * @returns {Object} 500 - 服务器内部错误
+ */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 获取相册详情（含照片数量）
-    const { data: album, error } = await supabase
+    const result = await db
       .from('albums')
       .select('*')
       .eq('id', id)
       .is('deleted_at', null)
       .single()
 
-    if (error || !album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (result.error || !result.data) {
+      return ApiError.notFound('相册不存在')
     }
 
-    return NextResponse.json(album)
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return createSuccessResponse(result.data)
+  } catch (error) {
+    return handleError(error, '查询相册详情失败')
   }
 }
 
-// PATCH /api/admin/albums/[id] - 更新相册设置
+/**
+ * 更新相册设置
+ * 
+ * @route PATCH /api/admin/albums/[id]
+ * @description 更新相册的设置信息（支持部分更新）
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @param {string} id - 相册ID（UUID格式）
+ * 
+ * @body {Object} requestBody - 要更新的字段（所有字段可选）
+ * @body {string} [requestBody.title] - 相册标题
+ * @body {string} [requestBody.description] - 相册描述
+ * @body {boolean} [requestBody.is_public] - 是否公开
+ * @body {string} [requestBody.layout] - 布局类型
+ * @body {string} [requestBody.sort_rule] - 排序规则
+ * @body {boolean} [requestBody.allow_download] - 允许下载
+ * @body {boolean} [requestBody.show_exif] - 显示EXIF信息
+ * @body {Object} [requestBody.settings] - 其他设置
+ * 
+ * @returns {Object} 200 - 更新成功
+ * @returns {Object} 200.data - 更新后的相册数据
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 404 - 相册不存在
+ * @returns {Object} 500 - 服务器内部错误
+ */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface UpdateAlbumRequestBody {
-      title?: string
-      description?: string | null
-      cover_photo_id?: string | null
-      is_public?: boolean
-      is_live?: boolean
-      layout?: 'masonry' | 'grid' | 'carousel'
-      sort_rule?: 'capture_desc' | 'capture_asc' | 'manual'
-      allow_download?: boolean
-      allow_batch_download?: boolean
-      show_exif?: boolean
-      watermark_enabled?: boolean
-      watermark_type?: 'text' | 'logo' | null
-      watermark_config?: Record<string, unknown> | null
-      color_grading?: { preset?: string } | null  // 新增：调色配置
-      password?: string | null
-      expires_at?: string | null
-      share_title?: string | null
-      share_description?: string | null
-      share_image_url?: string | null
-      poster_image_url?: string | null
-      event_date?: string | null
-      location?: string | null
-    }
-    let body: UpdateAlbumRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误')
     }
+
+    // 验证输入（使用 partial 允许所有字段可选）
+    const validation = safeValidate(updateAlbumSchema.partial(), body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
+    const validatedData = validation.data
     
-    // 允许更新的字段白名单
-    const allowedFields: (keyof AlbumUpdate)[] = [
-      'title',
-      'description',
-      'cover_photo_id',
-      'is_public',
-      'is_live',
-      'layout',
-      'sort_rule',
-      'allow_download',
-      'allow_batch_download',
-      'show_exif',
-      'allow_share',
-      'watermark_enabled',
-      'watermark_type',
-      'watermark_config',
-      'color_grading',  // 新增：调色配置
-      'password',
-      'expires_at',
-      'share_title',
-      'share_description',
-      'share_image_url',
-      'poster_image_url',
-      'event_date',
-      'location',
-    ]
-
-    // 过滤只保留允许的字段
+    // 构建更新数据（已验证的数据可以直接使用）
     const updateData: AlbumUpdate = {}
-    for (const field of allowedFields) {
-      if ((body as Record<string, unknown>)[field] !== undefined) {
-        // 密码字段：如果为空字符串，设置为 null；否则保持原值
-        if (field === 'password') {
-          const passwordValue = (body as Record<string, unknown>)[field]
-          ;(updateData as Record<string, unknown>)[field] = passwordValue === '' ? null : passwordValue
-        } else if (field === 'event_date' || field === 'expires_at') {
-          // 时间戳字段：如果为空字符串或无效值，设置为 null
-          const value = (body as Record<string, unknown>)[field] as string | undefined
-          if (!value || value === '' || value.trim() === '') {
-            ;(updateData as Record<string, unknown>)[field] = null
-          } else {
-            // 验证时间格式，如果是 ISO 格式的日期时间字符串，需要转换为完整的 ISO 格式
-            try {
-              const date = new Date(value)
-              if (isNaN(date.getTime())) {
-                ;(updateData as Record<string, unknown>)[field] = null
-              } else {
-                // 如果只有日期部分（YYYY-MM-DDTHH:mm），补充秒和时区
-                if (value.length === 16) {
-                  ;(updateData as Record<string, unknown>)[field] = date.toISOString()
-                } else {
-                  ;(updateData as Record<string, unknown>)[field] = value
-                }
-              }
-            } catch {
-              ;(updateData as Record<string, unknown>)[field] = null
-            }
-          }
-        } else if (field === 'watermark_config') {
-          // 确保 watermark_config 是有效的 JSON 对象
-          const watermarkConfigValue = (body as Record<string, unknown>)[field]
-          if (watermarkConfigValue !== null && typeof watermarkConfigValue !== 'object') {
-            console.error('Invalid watermark_config format:', watermarkConfigValue)
-            return NextResponse.json(
-              { error: { code: 'VALIDATION_ERROR', message: '水印配置格式错误' } },
-              { status: 400 }
-            )
-          }
-          
-          // 验证水印配置内容
-          if (watermarkConfigValue && typeof watermarkConfigValue === 'object') {
-            const config = watermarkConfigValue as Record<string, unknown>
-            
-            // 验证新格式（watermarks 数组）
-            if (config.watermarks && Array.isArray(config.watermarks)) {
-              if (config.watermarks.length > 6) {
-                return NextResponse.json(
-                  { error: { code: 'VALIDATION_ERROR', message: '最多支持6个水印' } },
-                  { status: 400 }
-                )
-              }
-              
-              for (const wm of config.watermarks) {
-                if (typeof wm !== 'object' || wm === null) {
-                  return NextResponse.json(
-                    { error: { code: 'VALIDATION_ERROR', message: '水印配置项格式错误' } },
-                    { status: 400 }
-                  )
-                }
-                
-                const watermark = wm as Record<string, unknown>
-                
-                // 验证类型
-                if (watermark.type !== 'text' && watermark.type !== 'logo') {
-                  return NextResponse.json(
-                    { error: { code: 'VALIDATION_ERROR', message: '水印类型必须是 text 或 logo' } },
-                    { status: 400 }
-                  )
-                }
-                
-                // 验证文字水印
-                if (watermark.type === 'text' && (!watermark.text || typeof watermark.text !== 'string' || !watermark.text.trim())) {
-                  return NextResponse.json(
-                    { error: { code: 'VALIDATION_ERROR', message: '文字水印内容不能为空' } },
-                    { status: 400 }
-                  )
-                }
-                
-                // 验证 Logo 水印
-                if (watermark.type === 'logo' && (!watermark.logoUrl || typeof watermark.logoUrl !== 'string' || !watermark.logoUrl.trim())) {
-                  return NextResponse.json(
-                    { error: { code: 'VALIDATION_ERROR', message: 'Logo URL 不能为空' } },
-                    { status: 400 }
-                  )
-                }
-                
-                // 验证透明度
-                if (watermark.opacity !== undefined) {
-                  const opacity = typeof watermark.opacity === 'number' ? watermark.opacity : parseFloat(String(watermark.opacity))
-                  if (isNaN(opacity) || opacity < 0 || opacity > 1) {
-                    return NextResponse.json(
-                      { error: { code: 'VALIDATION_ERROR', message: '透明度必须在 0-1 之间' } },
-                      { status: 400 }
-                    )
-                  }
-                }
-              }
-            }
-          }
-          
-          ;(updateData as Record<string, unknown>)[field] = watermarkConfigValue
-        } else if (field === 'color_grading') {
-          // 验证调色配置格式
-          const colorGradingValue = (body as Record<string, unknown>)[field]
-          
-          // null 是允许的（表示无风格）
-          if (colorGradingValue === null) {
-            ;(updateData as Record<string, unknown>)[field] = null
-          } else if (colorGradingValue !== undefined) {
-            // 必须是对象
-            if (typeof colorGradingValue !== 'object' || colorGradingValue === null) {
-              return NextResponse.json(
-                { error: { code: 'VALIDATION_ERROR', message: '调色配置格式错误' } },
-                { status: 400 }
-              )
-            }
-            
-            const config = colorGradingValue as Record<string, unknown>
-            
-            // 必须包含 preset 字段
-            if (!config.preset || typeof config.preset !== 'string') {
-              return NextResponse.json(
-                { error: { code: 'VALIDATION_ERROR', message: '调色配置必须包含 preset 字段' } },
-                { status: 400 }
-              )
-            }
-            
-            // 预设 ID 不能为空
-            if (config.preset.trim() === '') {
-              return NextResponse.json(
-                { error: { code: 'VALIDATION_ERROR', message: '预设 ID 不能为空' } },
-                { status: 400 }
-              )
-            }
-            
-            // 验证预设 ID 是否有效（可选，如果需要严格校验）
-            // 这里只做基本格式校验，具体预设 ID 的验证在数据库层面完成
-            
-            ;(updateData as Record<string, unknown>)[field] = colorGradingValue
-          }
-        } else if (field === 'share_image_url') {
-          // 验证分享图片URL格式和安全性
-          const shareImageUrl = (body as Record<string, unknown>)[field] as string | null | undefined
-          if (shareImageUrl && shareImageUrl.trim()) {
-            try {
-              const url = new URL(shareImageUrl.trim())
-              // 只允许 http 和 https 协议
-              if (!['http:', 'https:'].includes(url.protocol)) {
-                return NextResponse.json(
-                  { error: { code: 'VALIDATION_ERROR', message: '分享图片URL必须使用 http 或 https 协议' } },
-                  { status: 400 }
-                )
-              }
-              // 检查是否为内网地址（SSRF 防护）
-              const hostname = url.hostname.toLowerCase()
-              const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
-              const isPrivateIP = 
-                hostname.startsWith('192.168.') ||
-                hostname.startsWith('10.') ||
-                (hostname.startsWith('172.') && 
-                 parseInt(hostname.split('.')[1] || '0') >= 16 && 
-                 parseInt(hostname.split('.')[1] || '0') <= 31) ||
-                hostname.endsWith('.local')
-              
-              if (isLocalhost || isPrivateIP) {
-                return NextResponse.json(
-                  { error: { code: 'VALIDATION_ERROR', message: '分享图片URL不能使用内网地址' } },
-                  { status: 400 }
-                )
-              }
-              
-              ;(updateData as Record<string, unknown>)[field] = shareImageUrl.trim()
-            } catch {
-              return NextResponse.json(
-                { error: { code: 'VALIDATION_ERROR', message: '分享图片URL格式无效' } },
-                { status: 400 }
-              )
-            }
-          } else {
-            // 空字符串或null，设置为null
-            ;(updateData as Record<string, unknown>)[field] = null
-          }
-        } else if (field === 'poster_image_url') {
-          // 验证海报图片URL格式和安全性（与share_image_url相同的验证逻辑）
-          const posterImageUrl = (body as Record<string, unknown>)[field] as string | null | undefined
-          if (posterImageUrl && posterImageUrl.trim()) {
-            try {
-              const url = new URL(posterImageUrl.trim())
-              // 只允许 http 和 https 协议
-              if (!['http:', 'https:'].includes(url.protocol)) {
-                return NextResponse.json(
-                  { error: { code: 'VALIDATION_ERROR', message: '海报图片URL必须使用 http 或 https 协议' } },
-                  { status: 400 }
-                )
-              }
-              // 检查是否为内网地址（SSRF 防护）
-              const hostname = url.hostname.toLowerCase()
-              const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
-              const isPrivateIP =
-                hostname.startsWith('192.168.') ||
-                hostname.startsWith('10.') ||
-                (hostname.startsWith('172.') &&
-                  parseInt(hostname.split('.')[1] || '0') >= 16 &&
-                  parseInt(hostname.split('.')[1] || '0') <= 31) ||
-                hostname.endsWith('.local')
-
-              if (isLocalhost || isPrivateIP) {
-                return NextResponse.json(
-                  { error: { code: 'VALIDATION_ERROR', message: '海报图片URL不能使用内网地址' } },
-                  { status: 400 }
-                )
-              }
-
-              ;(updateData as Record<string, unknown>)[field] = posterImageUrl.trim()
-            } catch {
-              return NextResponse.json(
-                { error: { code: 'VALIDATION_ERROR', message: '海报图片URL格式无效' } },
-                { status: 400 }
-              )
-            }
-          } else {
-            // 空字符串或null，设置为null
-            ;(updateData as Record<string, unknown>)[field] = null
-          }
-        } else if (field === 'share_title' || field === 'share_description') {
-          // 分享标题和描述：空字符串转换为 null
-          const value = (body as Record<string, unknown>)[field] as string | null | undefined
-          ;(updateData as Record<string, unknown>)[field] = (value && value.trim()) ? value.trim() : null
-        } else {
-          ;(updateData as Record<string, unknown>)[field] = (body as Record<string, unknown>)[field]
-        }
-      }
+    
+    // 处理每个字段（只包含提供的字段）
+    if (validatedData.title !== undefined) {
+      updateData.title = validatedData.title.trim()
     }
-
-    // 验证必要字段
-    if (updateData.title !== undefined && !updateData.title.trim()) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '相册标题不能为空' } },
-        { status: 400 }
-      )
+    if (validatedData.description !== undefined) {
+      updateData.description = validatedData.description?.trim() || null
     }
-
-    // 验证布局类型
-    if (updateData.layout && !['masonry', 'grid', 'carousel'].includes(updateData.layout)) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '无效的布局类型' } },
-        { status: 400 }
-      )
+    if (validatedData.cover_photo_id !== undefined) {
+      updateData.cover_photo_id = validatedData.cover_photo_id || null
     }
-
-    // 验证排序规则
-    if (updateData.sort_rule && !['capture_desc', 'capture_asc', 'manual'].includes(updateData.sort_rule)) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '无效的排序规则' } },
-        { status: 400 }
-      )
+    if (validatedData.is_public !== undefined) {
+      updateData.is_public = validatedData.is_public
+    }
+    if (validatedData.is_live !== undefined) {
+      updateData.is_live = validatedData.is_live
+    }
+    if (validatedData.layout !== undefined) {
+      updateData.layout = validatedData.layout
+    }
+    if (validatedData.sort_rule !== undefined) {
+      updateData.sort_rule = validatedData.sort_rule
+    }
+    if (validatedData.allow_download !== undefined) {
+      updateData.allow_download = validatedData.allow_download
+    }
+    if (validatedData.allow_batch_download !== undefined) {
+      updateData.allow_batch_download = validatedData.allow_batch_download
+    }
+    if (validatedData.show_exif !== undefined) {
+      updateData.show_exif = validatedData.show_exif
+    }
+    if (validatedData.watermark_enabled !== undefined) {
+      updateData.watermark_enabled = validatedData.watermark_enabled
+    }
+    if (validatedData.watermark_type !== undefined) {
+      updateData.watermark_type = validatedData.watermark_type || null
+    }
+    if (validatedData.watermark_config !== undefined) {
+      updateData.watermark_config = validatedData.watermark_config as Json || null
+    }
+    if (validatedData.color_grading !== undefined) {
+      updateData.color_grading = validatedData.color_grading as Json || null
+    }
+    if (validatedData.password !== undefined) {
+      // 密码字段：空字符串转换为 null
+      updateData.password = validatedData.password || null
+    }
+    if (validatedData.expires_at !== undefined) {
+      // 时间字段：空字符串转换为 null，否则使用 ISO 格式
+      updateData.expires_at = validatedData.expires_at || null
+    }
+    if (validatedData.share_title !== undefined) {
+      updateData.share_title = validatedData.share_title?.trim() || null
+    }
+    if (validatedData.share_description !== undefined) {
+      updateData.share_description = validatedData.share_description?.trim() || null
+    }
+    if (validatedData.share_image_url !== undefined) {
+      updateData.share_image_url = validatedData.share_image_url || null
+    }
+    if (validatedData.poster_image_url !== undefined) {
+      updateData.poster_image_url = validatedData.poster_image_url || null
+    }
+    if (validatedData.event_date !== undefined) {
+      updateData.event_date = validatedData.event_date || null
+    }
+    if (validatedData.location !== undefined) {
+      updateData.location = validatedData.location?.trim() || null
     }
 
     // 同步照片计数（确保计数准确，排除已删除的）
-    const { count: actualPhotoCount } = await supabase
+    // 获取实际照片数量
+    const photoCountResult = await db
       .from('photos')
-      .select('*', { count: 'exact', head: true })
+      .select('*')
       .eq('album_id', id)
       .eq('status', 'completed')
       .is('deleted_at', null)
     
+    const actualPhotoCount = photoCountResult.count || photoCountResult.data?.length || 0
     if (actualPhotoCount !== null) {
       updateData.photo_count = actualPhotoCount
     }
@@ -413,112 +233,88 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     // 注意：水印配置变更后，只对新上传的照片生效
     // 已上传的照片不会被重新处理，避免数据库错误和性能问题
     // 水印配置会在照片上传时由 Worker 读取并应用
-    const { data: album, error } = await supabase
-      .from('albums')
-      .update(updateData)
-      .eq('id', id)
-      .is('deleted_at', null)
-      .select()
-      .single()
+    const result = await db.update('albums', updateData, { id, deleted_at: null })
 
-    if (error) {
-      console.error('Database update error:', error)
-      console.error('Update data:', JSON.stringify(updateData, null, 2))
-      return NextResponse.json(
-        { 
-          error: { 
-            code: 'DB_ERROR', 
-            message: error.message,
-            details: process.env.NODE_ENV === 'development' ? JSON.stringify(error) : undefined,
-          } 
-        },
-        { status: 500 }
-      )
+    if (result.error) {
+      return handleError(result.error, '更新相册失败')
     }
 
+    const album = result.data && result.data.length > 0 ? result.data[0] : null
     if (!album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+      return ApiError.notFound('相册不存在')
     }
 
     // 注意：水印配置变更后，只对新上传的照片生效
     // 已上传的照片不会被重新处理，避免数据库错误和性能问题
     // 水印配置会在照片上传时由 Worker 读取并应用（见 services/worker/src/index.ts）
 
-    return NextResponse.json({
+    return createSuccessResponse({
       ...album,
       message: '设置已更新。水印配置将应用于之后上传的新照片。'
     })
-  } catch (err) {
-    console.error('PATCH /api/admin/albums/[id] error:', err)
-    const errorMessage = err instanceof Error ? err.message : '未知错误'
-    const errorStack = err instanceof Error ? err.stack : undefined
-    
-    return NextResponse.json(
-      { 
-        error: { 
-          code: 'INTERNAL_ERROR', 
-          message: '服务器错误',
-          details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
-          stack: process.env.NODE_ENV === 'development' ? errorStack : undefined,
-        } 
-      },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '更新相册失败')
   }
 }
 
-// DELETE /api/admin/albums/[id] - 软删除相册
+/**
+ * 软删除相册
+ * 
+ * @route DELETE /api/admin/albums/[id]
+ * @description 软删除相册（将相册移至回收站，不立即删除数据）
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @param {string} id - 相册ID（UUID格式）
+ * 
+ * @returns {Object} 200 - 删除成功
+ * @returns {boolean} 200.data.success - 操作是否成功
+ * @returns {string} 200.data.message - 操作消息
+ * 
+ * @returns {Object} 400 - 请求参数错误（无效的相册ID）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 404 - 相册不存在
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @note 软删除后，相册数据仍保留在数据库中，可以通过恢复功能恢复
+ */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 软删除：设置 deleted_at 时间戳
-    const { data: album, error } = await supabase
-      .from('albums')
-      .update({ deleted_at: new Date().toISOString() })
-      .eq('id', id)
-      .is('deleted_at', null)
-      .select('id, title')
-      .single()
+    const result = await db.update('albums', { deleted_at: new Date().toISOString() }, { id, deleted_at: null })
 
-    if (error) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: error.message } },
-        { status: 500 }
-      )
+    if (result.error) {
+      return handleError(result.error, '删除相册失败')
     }
 
+    const album = result.data && result.data.length > 0 ? result.data[0] : null
     if (!album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在或已删除' } },
-        { status: 404 }
-      )
+      return ApiError.notFound('相册不存在或已删除')
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       message: `相册「${album.title}」已删除`,
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '删除相册失败')
   }
 }

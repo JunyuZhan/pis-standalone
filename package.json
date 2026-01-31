@@ -25,10 +25,11 @@
     "docker:up": "cd docker && docker-compose up -d",
     "docker:down": "cd docker && docker-compose down",
     "docker:logs": "cd docker && docker-compose logs -f",
-    "db:types": "cd apps/web && pnpm supabase:types",
+    "db:types": "echo 'Database types are now managed via PostgreSQL. Use pg_dump or a database introspection tool if needed.'",
     "pre-commit": "pnpm security-check && pnpm lint && pnpm test",
     "cleanup:failed-photos": "cd services/worker && pnpm exec tsx ../../scripts/cleanup-failed-photos.ts",
-    "cleanup:failed-photos:execute": "cd services/worker && pnpm exec tsx ../../scripts/cleanup-failed-photos.ts --execute"
+    "cleanup:failed-photos:execute": "cd services/worker && pnpm exec tsx ../../scripts/cleanup-failed-photos.ts --execute",
+    "create-admin": "pnpm exec tsx scripts/create-admin.ts"
   },
   "devDependencies": {
     "prettier": "^3.2.0",

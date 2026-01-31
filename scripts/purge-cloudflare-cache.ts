@@ -13,13 +13,18 @@
  *   - CLOUDFLARE_ZONE_ID: Cloudflare Zone ID (必需)
  *   - CLOUDFLARE_API_TOKEN: Cloudflare API Token (必需)
  *   - NEXT_PUBLIC_MEDIA_URL: 媒体服务器 URL (自动模式需要)
- *   - SUPABASE_URL: Supabase URL (自动模式需要)
- *   - SUPABASE_SERVICE_ROLE_KEY: Supabase Service Role Key (自动模式需要)
+ *   - DATABASE_TYPE: 数据库类型 (postgresql 或 supabase，默认: postgresql)
+ *   - DATABASE_HOST, DATABASE_PORT, DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD: PostgreSQL 配置
+ *   - SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: Supabase 配置（向后兼容）
  */
 
-import { createClient } from '@supabase/supabase-js'
 import { config } from 'dotenv'
 import { resolve } from 'path'
+import { fileURLToPath } from 'url'
+import { dirname } from 'path'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 // 加载环境变量
 config({ path: resolve(__dirname, '../.env') })
@@ -27,8 +32,7 @@ config({ path: resolve(__dirname, '../.env') })
 const zoneId = process.env.CLOUDFLARE_ZONE_ID
 const apiToken = process.env.CLOUDFLARE_API_TOKEN
 const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL
-const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const databaseType = process.env.DATABASE_TYPE || 'postgresql'
 
 interface PurgeCacheResult {
   success: boolean
@@ -115,23 +119,53 @@ function buildImageUrl(imageKey: string): string {
 }
 
 async function purgeDeletedPhotos() {
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error('缺少 Supabase 配置：请设置 SUPABASE_URL 和 SUPABASE_SERVICE_ROLE_KEY')
+  if (!mediaUrl) {
+    throw new Error('缺少媒体服务器配置：请设置 NEXT_PUBLIC_MEDIA_URL')
   }
 
-  const supabase = createClient(supabaseUrl, supabaseKey)
+  // 动态导入数据库客户端
+  let db: any
+  if (databaseType === 'postgresql') {
+    const { createAdminClient } = await import('../apps/web/src/lib/database')
+    db = await createAdminClient()
+  } else {
+    // Supabase 模式（向后兼容）
+    const { createClient } = await import('@supabase/supabase-js')
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('缺少 Supabase 配置：请设置 SUPABASE_URL 和 SUPABASE_SERVICE_ROLE_KEY')
+    }
+    db = createClient(supabaseUrl, supabaseKey)
+  }
 
   console.log('🔍 查询已删除的照片...')
   
   // 查询所有已删除但未永久删除的照片（deleted_at 不为空）
-  const { data: deletedPhotos, error } = await supabase
-    .from('photos')
-    .select('id, original_key, thumb_key, preview_key')
-    .not('deleted_at', 'is', null)
-    .limit(1000) // 限制一次处理的数量
-
-  if (error) {
-    throw new Error(`查询失败: ${error.message}`)
+  let deletedPhotos: any[]
+  
+  if (databaseType === 'postgresql') {
+    const result = await db.from('photos')
+      .select('id, original_key, thumb_key, preview_key')
+      .not('deleted_at', 'is', null)
+      .limit(1000)
+    
+    if (result.error) {
+      throw new Error(`查询已删除照片失败: ${result.error.message}`)
+    }
+    deletedPhotos = result.data || []
+  } else {
+    // Supabase 模式
+    const result = await db
+      .from('photos')
+      .select('id, original_key, thumb_key, preview_key')
+      .not('deleted_at', 'is', null)
+      .limit(1000)
+    
+    if (result.error) {
+      throw new Error(`查询已删除照片失败: ${result.error.message}`)
+    }
+    deletedPhotos = result.data || []
   }
 
   if (!deletedPhotos || deletedPhotos.length === 0) {
@@ -174,7 +208,7 @@ async function purgeDeletedPhotos() {
   }
 }
 
-async function purgeUrls(urls: string[]) {
+async function purgeUrls(urls: string[]): Promise<void> {
   if (urls.length === 0) {
     console.error('❌ 错误: 请提供要清除的 URL')
     console.log('\n用法:')
@@ -223,8 +257,14 @@ Cloudflare CDN 缓存清除工具
   CLOUDFLARE_ZONE_ID          Cloudflare Zone ID (必需)
   CLOUDFLARE_API_TOKEN        Cloudflare API Token (必需)
   NEXT_PUBLIC_MEDIA_URL       媒体服务器 URL (自动模式需要)
-  SUPABASE_URL                Supabase URL (自动模式需要)
-  SUPABASE_SERVICE_ROLE_KEY   Supabase Service Role Key (自动模式需要)
+  DATABASE_TYPE               数据库类型 (postgresql 或 supabase，默认: postgresql)
+  DATABASE_HOST               PostgreSQL 主机 (PostgreSQL 模式需要)
+  DATABASE_PORT               PostgreSQL 端口 (PostgreSQL 模式需要)
+  DATABASE_NAME               数据库名称 (PostgreSQL 模式需要)
+  DATABASE_USER               数据库用户 (PostgreSQL 模式需要)
+  DATABASE_PASSWORD           数据库密码 (PostgreSQL 模式需要)
+  SUPABASE_URL                Supabase URL (Supabase 模式需要，向后兼容)
+  SUPABASE_SERVICE_ROLE_KEY   Supabase Service Role Key (Supabase 模式需要，向后兼容)
 
 示例:
   # 清除指定 URL

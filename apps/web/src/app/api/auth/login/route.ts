@@ -1,16 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { checkRateLimit } from '@/middleware-rate-limit'
+import { 
+  verifyPassword, 
+  createSession, 
+  getAuthDatabase 
+} from '@/lib/auth'
+import { initAuthDatabase } from '@/lib/auth/database'
+import { loginSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse } from '@/lib/validation/error-handler'
+
+// 初始化认证数据库（如果尚未初始化）
+try {
+  initAuthDatabase()
+} catch {
+  // 可能已经初始化，忽略错误
+}
 
 /**
  * 登录 API 路由（服务端）
- * 完全在服务端执行登录，防止客户端绕过速率限制
  * 
- * 安全措施：
- * 1. 基于 IP 的速率限制（5 次/分钟）
- * 2. 基于邮箱的速率限制（防止针对特定账户的攻击）
- * 3. 统一错误消息（不暴露具体错误原因）
- * 4. 服务端执行登录（客户端无法绕过）
+ * @route POST /api/auth/login
+ * @description 用户登录接口，完全在服务端执行登录，防止客户端绕过速率限制
+ * 
+ * @security
+ * - 基于 IP 的速率限制（5 次/分钟）
+ * - 基于邮箱的速率限制（防止针对特定账户的攻击）
+ * - 统一错误消息（不暴露具体错误原因）
+ * - 服务端执行登录（客户端无法绕过）
+ * 
+ * @body {Object} requestBody - 登录请求体
+ * @body {string} requestBody.email - 用户邮箱（必填）
+ * @body {string} requestBody.password - 用户密码（必填）
+ * 
+ * @returns {Object} 200 - 登录成功
+ * @returns {Object} 200.data.user - 用户信息
+ * @returns {string} 200.data.user.id - 用户ID
+ * @returns {string} 200.data.user.email - 用户邮箱
+ * 
+ * @returns {Object} 400 - 请求参数错误
+ * @returns {Object} 401 - 认证失败（邮箱或密码错误）
+ * @returns {Object} 429 - 请求过于频繁（速率限制）
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @example
+ * ```typescript
+ * const response = await fetch('/api/auth/login', {
+ *   method: 'POST',
+ *   headers: { 'Content-Type': 'application/json' },
+ *   body: JSON.stringify({
+ *     email: 'user@example.com',
+ *     password: 'password123'
+ *   })
+ * })
+ * ```
  */
 export async function POST(request: NextRequest) {
   try {
@@ -31,28 +73,29 @@ export async function POST(request: NextRequest) {
       ip = realIp
     }
 
-    // 解析请求体
-    let body: { email: string; password: string; turnstileToken?: string }
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求格式错误' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求格式错误')
     }
 
-    const { email, password, turnstileToken } = body
+    // 验证输入（不包括 turnstileToken，单独处理）
+    const validation = safeValidate(loginSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
+    const { email, password } = validation.data
+    const turnstileToken = (body as { turnstileToken?: string }).turnstileToken
 
     // 如果配置了 Turnstile，验证 token
     const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY
     if (turnstileSecretKey) {
       if (!turnstileToken) {
         console.warn('Turnstile configured but no token provided')
-        return NextResponse.json(
-          { error: { code: 'CAPTCHA_REQUIRED', message: '请完成人机验证' } },
-          { status: 400 }
-        )
+        return handleError(new Error('请完成人机验证'), '请完成人机验证')
       }
 
       // 验证 token
@@ -105,39 +148,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 验证输入
-    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '邮箱和密码不能为空' } },
-        { status: 400 }
-      )
-    }
-
+    // 邮箱已通过 zod 验证，直接使用
     const normalizedEmail = email.trim().toLowerCase()
-
-    // 邮箱格式验证
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(normalizedEmail)) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '邮箱格式不正确' } },
-        { status: 400 }
-      )
-    }
-
-    // 输入长度限制（防止潜在的 DoS 攻击）
-    if (normalizedEmail.length > 254) { // RFC 5321 最大邮箱长度
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '邮箱长度超出限制' } },
-        { status: 400 }
-      )
-    }
-
-    if (password.length > 128) { // 合理的密码最大长度
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '密码长度超出限制' } },
-        { status: 400 }
-      )
-    }
 
     // 双重速率限制：
     // 1. 基于 IP 的限制（防止单 IP 暴力破解）
@@ -188,15 +200,119 @@ export async function POST(request: NextRequest) {
     }
 
     // 速率限制通过，执行登录
-    const supabase = await createClient()
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
-    })
+    try {
+      const authDb = getAuthDatabase()
+      
+      // 查找用户
+      const user = await authDb.findUserByEmail(normalizedEmail)
+      
+      if (!user) {
+        // 用户不存在，返回统一错误消息（防止用户枚举）
+        const maskedEmail = normalizedEmail.length > 3 
+          ? normalizedEmail.substring(0, 3) + '***' 
+          : '***'
+        console.log(JSON.stringify({
+          type: 'login_attempt',
+          email: maskedEmail,
+          ip,
+          success: false,
+          reason: 'user_not_found',
+          timestamp: new Date().toISOString(),
+        }))
 
-    if (error) {
-      // 记录失败的登录尝试（用于安全审计）
-      // 注意：不记录完整邮箱，只记录部分信息
+        return NextResponse.json(
+          {
+            error: {
+              code: 'AUTH_ERROR',
+              message: '邮箱或密码错误',
+            },
+          },
+          {
+            status: 401,
+            headers: {
+              'X-RateLimit-Limit': '5',
+              'X-RateLimit-Remaining': (ipRateLimit.remaining - 1).toString(),
+              'X-RateLimit-Reset': new Date(ipRateLimit.resetAt).toISOString(),
+            },
+          }
+        )
+      }
+
+      // 验证密码
+      const isValidPassword = await verifyPassword(password, user.password_hash)
+      
+      if (!isValidPassword) {
+        // 密码错误，返回统一错误消息
+        const maskedEmail = normalizedEmail.length > 3 
+          ? normalizedEmail.substring(0, 3) + '***' 
+          : '***'
+        console.log(JSON.stringify({
+          type: 'login_attempt',
+          email: maskedEmail,
+          ip,
+          success: false,
+          reason: 'invalid_password',
+          timestamp: new Date().toISOString(),
+        }))
+
+        return NextResponse.json(
+          {
+            error: {
+              code: 'AUTH_ERROR',
+              message: '邮箱或密码错误',
+            },
+          },
+          {
+            status: 401,
+            headers: {
+              'X-RateLimit-Limit': '5',
+              'X-RateLimit-Remaining': (ipRateLimit.remaining - 1).toString(),
+              'X-RateLimit-Reset': new Date(ipRateLimit.resetAt).toISOString(),
+            },
+          }
+        )
+      }
+
+      // 登录成功，创建会话
+      const session = await createSession({
+        id: user.id,
+        email: user.email,
+      })
+
+      // 更新最后登录时间（异步，不阻塞响应）
+      if ('updateLastLogin' in authDb && typeof authDb.updateLastLogin === 'function') {
+        authDb.updateLastLogin(user.id).catch((err) => {
+          console.error('Failed to update last login time:', err)
+        })
+      }
+
+      // 记录成功的登录尝试（用于安全审计）
+      const maskedEmail = normalizedEmail.length > 3 
+        ? normalizedEmail.substring(0, 3) + '***' 
+        : '***'
+      console.log(JSON.stringify({
+        type: 'login_attempt',
+        email: maskedEmail,
+        ip,
+        success: true,
+        timestamp: new Date().toISOString(),
+      }))
+
+      // 会话 cookies 已由 createSession 设置
+      return createSuccessResponse(
+        {
+          success: true,
+          user: {
+            id: session.user.id,
+            email: session.user.email,
+          },
+        },
+        200
+      )
+    } catch (error) {
+      // 数据库错误或其他内部错误
+      console.error('Login error:', error)
+      
       const maskedEmail = normalizedEmail.length > 3 
         ? normalizedEmail.substring(0, 3) + '***' 
         : '***'
@@ -205,11 +321,11 @@ export async function POST(request: NextRequest) {
         email: maskedEmail,
         ip,
         success: false,
+        reason: 'internal_error',
         timestamp: new Date().toISOString(),
       }))
 
-      // 统一错误消息，不暴露具体错误原因（防止用户枚举和信息泄露）
-      // 无论是什么错误（密码错误、用户不存在、邮箱未验证等），都返回相同的消息
+      // 统一错误消息，不暴露内部错误
       return NextResponse.json(
         {
           error: {
@@ -227,38 +343,6 @@ export async function POST(request: NextRequest) {
         }
       )
     }
-
-    // 登录成功
-    // 记录成功的登录尝试（用于安全审计）
-    const maskedEmail = normalizedEmail.length > 3 
-      ? normalizedEmail.substring(0, 3) + '***' 
-      : '***'
-    console.log(JSON.stringify({
-      type: 'login_attempt',
-      email: maskedEmail,
-      ip,
-      success: true,
-      timestamp: new Date().toISOString(),
-    }))
-
-    // 会话 cookies 已由 Supabase 自动设置
-    return NextResponse.json(
-      {
-        success: true,
-        user: {
-          id: data.user.id,
-          email: data.user.email,
-        },
-      },
-      {
-        status: 200,
-        headers: {
-          'X-RateLimit-Limit': '5',
-          'X-RateLimit-Remaining': ipRateLimit.remaining.toString(),
-          'X-RateLimit-Reset': new Date(ipRateLimit.resetAt).toISOString(),
-        },
-      }
-    )
   } catch (error) {
     console.error('Login API error:', error)
     // 统一错误消息，不暴露内部错误

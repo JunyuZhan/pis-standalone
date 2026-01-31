@@ -87,7 +87,7 @@
 - Complete data privacy, no external dependencies
 
 ### 🚀 **Production Ready**
-- **One-click deployment**: Guided script for Vercel + Supabase setup
+- **One-click deployment**: Guided script for fully self-hosted setup
 - **Auto-generated secrets**: API keys, passwords
 - Queue-based auto-scaling
 - Health monitoring and alert system (Telegram/Email/Log)
@@ -100,17 +100,19 @@
 
 ### Deployment Architecture
 
-**Vercel + Supabase + Self-hosted Worker**
+**Fully Self-Hosted Deployment**
 
-- **Frontend**: Deploy to Vercel (automatic)
-- **Database**: Supabase Cloud (free tier available)
-- **Worker & Storage**: Self-hosted on your server
+- **Frontend**: Self-hosted (Docker + Nginx)
+- **Database**: PostgreSQL (self-hosted)
+- **Storage**: MinIO (self-hosted)
+- **Worker**: Self-hosted (Docker)
+- **Authentication**: Custom authentication (username/password)
 
 ### One-Click Deployment
 
 ```bash
 # One command to install (copy and paste)
-curl -sSL https://raw.githubusercontent.com/JunyuZhan/PIS/main/scripts/install.sh | tr -d '\r' | bash
+curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/install.sh | tr -d '\r' | bash
 ```
 
 > 💡 **Note**: The `tr -d '\r'` command ensures compatibility across different systems by removing Windows line endings. The script also includes automatic line ending cleanup as a fallback.
@@ -119,15 +121,15 @@ Or manually:
 
 ```bash
 git clone https://github.com/JunyuZhan/pis-standalone.git
-cd pis/docker
+cd pis-standalone/docker
 bash deploy.sh
 ```
 
 The script will guide you through:
-- ✅ Configure Supabase (database & authentication)
+- ✅ Configure PostgreSQL database
 - ✅ Auto-generate security secrets
-- ✅ Configure storage (MinIO/OSS/COS/S3)
-- ✅ Start Worker and storage services
+- ✅ Configure storage (MinIO)
+- ✅ Start all services (PostgreSQL + MinIO + Redis + Web + Worker + Nginx)
 
 > 📖 **Detailed guide**: [Deployment Documentation](docs/i18n/en/DEPLOYMENT.md)
 
@@ -149,9 +151,11 @@ pnpm dev
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Homepage | http://localhost:3000 | - |
-| Admin Dashboard | http://localhost:3000/admin/login | Supabase user |
-| MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
+| Homepage | http://localhost:8080 | - |
+| Admin Dashboard | http://localhost:8080/admin/login | Admin user (created by deploy script) |
+| MinIO Console | http://localhost:9001 | minioadmin / minioadmin (仅本地调试) |
+
+> **Note**: Production deployment uses port 8080 with frpc/ddnsto for internal network access. See [Deployment Guide](docs/i18n/en/DEPLOYMENT.md) for details.
 
 ---
 
@@ -159,10 +163,11 @@ pnpm dev
 
 - **[Deployment Guide](docs/i18n/en/DEPLOYMENT.md)** - Detailed deployment instructions
 - **[Development Guide](docs/DEVELOPMENT.md)** - Development setup and guidelines
-- **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture overview
+- **[Architecture Guide](docs/ARCHITECTURE.example.md)** - System architecture overview (public version)
 - **[User Guide](docs/USER_GUIDE.md)** - Feature usage guide
+- **[Scripts Guide](scripts/README.md)** - All available scripts and tools
 
-> 📚 **Full documentation**: [docs/README.md](docs/README.md)
+> 📚 **Full documentation**: [docs/README.md](docs/README.md) - Complete documentation index
 
 ---
 
@@ -206,7 +211,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) and [AUTHORS.m
 
 ## 🙏 Acknowledgments
 
-Built with: [Next.js](https://nextjs.org/) • [Supabase](https://supabase.com/) • [MinIO](https://min.io/) • [Sharp](https://sharp.pixelplumbing.com/) • [Tailwind CSS](https://tailwindcss.com/) • [BullMQ](https://docs.bullmq.io/)
+Built with: [Next.js](https://nextjs.org/) • [PostgreSQL](https://www.postgresql.org/) • [MinIO](https://min.io/) • [Sharp](https://sharp.pixelplumbing.com/) • [Tailwind CSS](https://tailwindcss.com/) • [BullMQ](https://docs.bullmq.io/)
 
 ---
 
@@ -214,7 +219,7 @@ Built with: [Next.js](https://nextjs.org/) • [Supabase](https://supabase.com/)
 
 - **Image Style Presets**: 13 professional color grading presets (portrait, landscape, general)
 - **Batch Download Control**: Admin-controlled batch download with presigned URLs
-- **Real-time Sync**: Live photo status updates via Supabase Realtime
+- **Real-time Sync**: Live photo status updates via PostgreSQL notifications
 
 > 📖 **Learn more**: [Quick Start Guide](docs/QUICK_START.md) • [User Guide](docs/USER_GUIDE.md)
 
@@ -231,12 +236,14 @@ Built with: [Next.js](https://nextjs.org/) • [Supabase](https://supabase.com/)
 
 ### Getting Started
 - [Deployment Guide](docs/i18n/en/DEPLOYMENT.md) - Complete deployment guide (includes one-click deployment quick start)
+- [Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md) - Pre-deployment checklist
 - [Architecture Guide](docs/ARCHITECTURE.example.md) - System architecture and quick reference
-- [Environment Variables](docs/ENVIRONMENT_VARIABLES.example.md) - Environment configuration (includes Vercel quick setup)
+- [Environment Variables](docs/ENVIRONMENT_VARIABLES.md) - Environment configuration (includes self-hosted setup)
 
 ### Development & Security
 - [Development Guide](docs/DEVELOPMENT.md) - Development setup, code standards, and feature documentation
 - [Security Guide](docs/SECURITY.md) - Security best practices, Turnstile setup, sensitive docs management
+- [Scripts Guide](scripts/README.md) - All available scripts and tools
 
 ---
 

@@ -1,118 +1,131 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import type { AlbumTemplateInsert, Json } from '@/types/database'
+import { createTemplateSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 模板管理 API
- * - GET: 获取所有模板
- * - POST: 创建新模板
+ * 
+ * @route GET /api/admin/templates
+ * @route POST /api/admin/templates
+ * @description 相册模板管理接口（用于快速创建相册）
  */
 
-// GET /api/admin/templates - 获取模板列表
-export async function GET() {
+/**
+ * 获取模板列表
+ * 
+ * @route GET /api/admin/templates
+ * @description 获取所有相册模板列表
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @returns {Object} 200 - 成功返回模板列表
+ * @returns {Object[]} 200.data.templates - 模板数组
+ * @returns {string} 200.data.templates[].id - 模板ID
+ * @returns {string} 200.data.templates[].name - 模板名称
+ * @returns {string} [200.data.templates[].description] - 模板描述
+ * 
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 500 - 服务器内部错误
+ */
+export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    const { data, error } = await supabase
+    const result = await db
       .from('album_templates')
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (error) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: error.message } },
-        { status: 500 }
-      )
+    if (result.error) {
+      return handleError(result.error, '查询模板列表失败')
     }
 
-    return NextResponse.json({ templates: data || [] })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return createSuccessResponse({ templates: result.data || [] })
+  } catch (error) {
+    return handleError(error, '查询模板列表失败')
   }
 }
 
-// POST /api/admin/templates - 创建新模板
+/**
+ * 创建新模板
+ * 
+ * @route POST /api/admin/templates
+ * @description 创建新的相册模板，用于快速创建相册
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @body {Object} requestBody - 模板数据
+ * @body {string} requestBody.name - 模板名称（必填，1-200字符）
+ * @body {string} [requestBody.description] - 模板描述（可选，最多1000字符）
+ * @body {Object} [requestBody.settings] - 模板设置（可选）
+ * @body {boolean} [requestBody.settings.is_public] - 是否公开
+ * @body {string} [requestBody.settings.layout] - 布局类型
+ * @body {string} [requestBody.settings.sort_rule] - 排序规则
+ * @body {boolean} [requestBody.settings.allow_download] - 允许下载
+ * @body {boolean} [requestBody.settings.show_exif] - 显示EXIF信息
+ * 
+ * @returns {Object} 200 - 创建成功
+ * @returns {Object} 200.data - 创建的模板数据
+ * @returns {string} 200.data.id - 模板ID
+ * @returns {string} 200.data.name - 模板名称
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 500 - 服务器内部错误
+ */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface CreateTemplateRequestBody {
-      name: string
-      description?: string | null
-      is_public?: boolean
-      layout?: 'masonry' | 'grid' | 'carousel'
-      sort_rule?: 'capture_desc' | 'capture_asc' | 'manual'
-      allow_download?: boolean
-      allow_batch_download?: boolean
-      show_exif?: boolean
-      password?: string | null
-      expires_at?: string | null
-      watermark_enabled?: boolean
-      watermark_type?: 'text' | 'logo' | null
-      watermark_config?: Json
-    }
-    let body: CreateTemplateRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
-    
+
+    // 验证输入
+    const validation = safeValidate(createTemplateSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
     const {
       name,
       description,
-      is_public,
-      layout,
-      sort_rule,
-      allow_download,
-      allow_batch_download,
-      show_exif,
-      password,
-      expires_at,
-      watermark_enabled,
-      watermark_type,
-      watermark_config,
-    } = body
+      settings,
+    } = validation.data
 
-    // 验证必填字段
-    if (!name || !name.trim()) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '模板名称不能为空' } },
-        { status: 400 }
-      )
-    }
+    // 从 settings 中提取其他字段（如果存在）
+    const is_public = (settings as Record<string, unknown>)?.is_public as boolean | undefined
+    const layout = (settings as Record<string, unknown>)?.layout as 'masonry' | 'grid' | 'carousel' | undefined
+    const sort_rule = (settings as Record<string, unknown>)?.sort_rule as 'capture_desc' | 'capture_asc' | 'manual' | undefined
+    const allow_download = (settings as Record<string, unknown>)?.allow_download as boolean | undefined
+    const allow_batch_download = (settings as Record<string, unknown>)?.allow_batch_download as boolean | undefined
+    const show_exif = (settings as Record<string, unknown>)?.show_exif as boolean | undefined
+    const password = (settings as Record<string, unknown>)?.password as string | null | undefined
+    const expires_at = (settings as Record<string, unknown>)?.expires_at as string | null | undefined
+    const watermark_enabled = (settings as Record<string, unknown>)?.watermark_enabled as boolean | undefined
+    const watermark_type = (settings as Record<string, unknown>)?.watermark_type as 'text' | 'logo' | null | undefined
+    const watermark_config = (settings as Record<string, unknown>)?.watermark_config as Json | undefined
 
     // 构建插入数据
     const insertData: AlbumTemplateInsert = {
@@ -131,24 +144,14 @@ export async function POST(request: NextRequest) {
       watermark_config: (watermark_config || {}) as Json,
     }
 
-    const { data, error } = await supabase
-      .from('album_templates')
-      .insert(insertData)
-      .select()
-      .single()
+    const insertResult = await db.insert('album_templates', insertData)
 
-    if (error) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: error.message } },
-        { status: 500 }
-      )
+    if (insertResult.error) {
+      return handleError(insertResult.error, '创建模板失败')
     }
 
-    return NextResponse.json(data)
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return createSuccessResponse(insertResult.data && insertResult.data.length > 0 ? insertResult.data[0] : null)
+  } catch (error) {
+    return handleError(error, '创建模板失败')
   }
 }

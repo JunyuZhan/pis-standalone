@@ -1,11 +1,7 @@
 'use client'
 
 import { useEffect, useCallback, useRef } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import type { Photo } from '@/types/database'
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
-
-type PhotoChangePayload = RealtimePostgresChangesPayload<Photo>
 
 interface UsePhotoRealtimeOptions {
   albumId: string
@@ -16,7 +12,10 @@ interface UsePhotoRealtimeOptions {
 }
 
 /**
- * Supabase Realtime Hook - 监听照片变更
+ * 照片变更监听 Hook（使用轮询替代 Realtime）
+ * 
+ * 注意：PostgreSQL 没有内置 Realtime 功能，使用轮询方式检查照片更新
+ * 轮询间隔：5秒（可在环境变量中配置 POLLING_INTERVAL）
  * 
  * 使用方法:
  * ```tsx
@@ -45,92 +44,69 @@ export function usePhotoRealtime({
   onUpdate,
   onDelete,
 }: UsePhotoRealtimeOptions) {
-  const supabase = createClient()
-  
   // 使用 ref 存储回调，避免重复订阅
   const callbacksRef = useRef({ onInsert, onUpdate, onDelete })
   callbacksRef.current = { onInsert, onUpdate, onDelete }
 
-  const handleChanges = useCallback((payload: PhotoChangePayload) => {
-    const { eventType, new: newRecord, old: oldRecord } = payload
+  // 存储已知的照片ID，用于检测新照片
+  const knownPhotoIdsRef = useRef<Set<string>>(new Set())
 
-    switch (eventType) {
-      case 'INSERT':
-        if (newRecord && newRecord.album_id === albumId) {
-          // 仅处理 completed 状态且未删除的照片
-          if (newRecord.status === 'completed' && !newRecord.deleted_at) {
-            callbacksRef.current.onInsert?.(newRecord as Photo)
-          }
-        }
-        break
+  const checkForUpdates = useCallback(async () => {
+    if (!albumId) return
 
-      case 'UPDATE':
-        if (newRecord && newRecord.album_id === albumId) {
-          // 处理软删除：如果 deleted_at 从 null 变为非 null，触发删除回调
-          if (!oldRecord?.deleted_at && newRecord.deleted_at) {
-            callbacksRef.current.onDelete?.(newRecord.id as string)
-            return
-          }
-          
-          // 处理恢复：如果 deleted_at 从非 null 变为 null，触发插入回调
-          if (oldRecord?.deleted_at && !newRecord.deleted_at && newRecord.status === 'completed') {
-            callbacksRef.current.onInsert?.(newRecord as Photo)
-            return
-          }
-          
-          // 照片处理完成时触发插入（仅未删除的照片）
-          if (
-            oldRecord?.status !== 'completed' &&
-            newRecord.status === 'completed' &&
-            !newRecord.deleted_at
-          ) {
-            callbacksRef.current.onInsert?.(newRecord as Photo)
-          } else if (newRecord.status === 'completed' && !newRecord.deleted_at) {
-            // 更新已完成且未删除的照片
-            callbacksRef.current.onUpdate?.(newRecord as Photo)
-          }
-        }
-        break
+    try {
+      // 获取最新的照片列表（只获取 completed 状态且未删除的照片）
+      const response = await fetch(`/api/public/albums/${albumId}/photos?limit=100&sort=capture_desc`)
+      if (!response.ok) return
 
-      case 'DELETE':
-        if (oldRecord && oldRecord.album_id === albumId) {
-          callbacksRef.current.onDelete?.(oldRecord.id as string)
+      const data = await response.json()
+      const currentPhotos = data.photos || []
+
+      // 检测新照片
+      const currentPhotoIds = new Set(currentPhotos.map((p: Photo) => p.id))
+      const newPhotos = currentPhotos.filter((p: Photo) => !knownPhotoIdsRef.current.has(p.id))
+
+      newPhotos.forEach((photo: Photo) => {
+        if (photo.status === 'completed' && !photo.deleted_at) {
+          callbacksRef.current.onInsert?.(photo)
+          knownPhotoIdsRef.current.add(photo.id)
         }
-        break
+      })
+
+      // 更新已知照片ID集合
+      currentPhotoIds.forEach((id: string) => knownPhotoIdsRef.current.add(id))
+
+      // 清理已删除的照片ID
+      knownPhotoIdsRef.current.forEach((id: string) => {
+        if (!currentPhotoIds.has(id)) {
+          callbacksRef.current.onDelete?.(id)
+          knownPhotoIdsRef.current.delete(id)
+        }
+      })
+    } catch (error) {
+      console.error('Failed to check for photo updates:', error)
     }
   }, [albumId])
 
   useEffect(() => {
     if (!enabled || !albumId) return
 
-    // 订阅照片表的变更
-    const channel = supabase
-      .channel(`photos:album:${albumId}`)
-      .on<Photo>(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'photos',
-          filter: `album_id=eq.${albumId}`,
-        },
-        handleChanges
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log(`🔔 Realtime subscribed: album ${albumId}`)
-        }
-      })
+    // 初始化已知照片ID
+    checkForUpdates()
+
+    // 设置轮询间隔（默认5秒）
+    const pollingInterval = parseInt(process.env.NEXT_PUBLIC_POLLING_INTERVAL || '5000', 10)
+    const intervalId = setInterval(checkForUpdates, pollingInterval)
 
     return () => {
-      console.log(`🔕 Realtime unsubscribed: album ${albumId}`)
-      supabase.removeChannel(channel)
+      clearInterval(intervalId)
+      knownPhotoIdsRef.current.clear()
     }
-  }, [supabase, albumId, enabled, handleChanges])
+  }, [albumId, enabled, checkForUpdates])
 }
 
 /**
- * 管理员端使用 - 监听所有状态变更
+ * 管理员端使用 - 监听所有状态变更（使用轮询）
  */
 export function usePhotoRealtimeAdmin({
   albumId,
@@ -141,36 +117,57 @@ export function usePhotoRealtimeAdmin({
   enabled?: boolean
   onStatusChange?: (photoId: string, status: Photo['status']) => void
 }) {
-  const supabase = createClient()
   const callbackRef = useRef(onStatusChange)
   callbackRef.current = onStatusChange
+
+  // 存储照片状态映射
+  const photoStatusMapRef = useRef<Map<string, Photo['status']>>(new Map())
+
+  const checkForStatusChanges = useCallback(async () => {
+    if (!albumId) return
+
+    try {
+      // 获取所有状态的照片（包括处理中的）
+      const response = await fetch(`/api/admin/albums/${albumId}/photos`)
+      if (!response.ok) return
+
+      const data = await response.json()
+      const currentPhotos = data.photos || []
+
+      // 检测状态变更
+      currentPhotos.forEach((photo: Photo) => {
+        const oldStatus = photoStatusMapRef.current.get(photo.id)
+        if (oldStatus && oldStatus !== photo.status) {
+          callbackRef.current?.(photo.id, photo.status)
+        }
+        photoStatusMapRef.current.set(photo.id, photo.status)
+      })
+
+      // 清理已删除的照片
+      const currentPhotoIds = new Set(currentPhotos.map((p: Photo) => p.id))
+      photoStatusMapRef.current.forEach((_, id) => {
+        if (!currentPhotoIds.has(id)) {
+          photoStatusMapRef.current.delete(id)
+        }
+      })
+    } catch (error) {
+      console.error('Failed to check for photo status changes:', error)
+    }
+  }, [albumId])
 
   useEffect(() => {
     if (!enabled || !albumId) return
 
-    const channel = supabase
-      .channel(`admin:photos:${albumId}`)
-      .on<Photo>(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'photos',
-          filter: `album_id=eq.${albumId}`,
-        },
-        (payload) => {
-          const newPhoto = payload.new as Photo
-          const oldPhoto = payload.old as Partial<Photo>
-          
-          if (newPhoto.status !== oldPhoto.status) {
-            callbackRef.current?.(newPhoto.id, newPhoto.status)
-          }
-        }
-      )
-      .subscribe()
+    // 初始化状态映射
+    checkForStatusChanges()
+
+    // 设置轮询间隔（管理员端更频繁，默认3秒）
+    const pollingInterval = parseInt(process.env.NEXT_PUBLIC_ADMIN_POLLING_INTERVAL || '3000', 10)
+    const intervalId = setInterval(checkForStatusChanges, pollingInterval)
 
     return () => {
-      supabase.removeChannel(channel)
+      clearInterval(intervalId)
+      photoStatusMapRef.current.clear()
     }
-  }, [supabase, albumId, enabled])
+  }, [albumId, enabled, checkForStatusChanges])
 }

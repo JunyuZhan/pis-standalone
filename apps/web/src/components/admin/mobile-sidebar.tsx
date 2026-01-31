@@ -5,9 +5,9 @@ import { Menu, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { usePathname } from 'next/navigation'
 import { SidebarContent } from './sidebar'
-import type { User } from '@supabase/supabase-js'
+import type { AuthUser } from '@/lib/auth'
 
-export function MobileSidebar({ user }: { user: User }) {
+export function MobileSidebar({ user }: { user: AuthUser }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
 

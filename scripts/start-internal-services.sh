@@ -3,11 +3,14 @@
 # ============================================
 # PIS 内网服务启动脚本
 # 
-# 用途：启动 Vercel + Supabase 架构所需的内网服务
+# 用途：启动内网服务（适用于混合部署模式）
 # - MinIO: 对象存储
 # - Redis: 任务队列
+# - PostgreSQL: 数据库（可选，如果使用完全自托管模式）
 # 
-# 注意：Web 服务部署在 Vercel，数据库使用 Supabase（云端）
+# 部署模式：
+# - 完全自托管模式：所有服务都在本地（PostgreSQL + MinIO + Redis + Web + Worker）
+# - 混合部署模式：Web 在 Vercel，数据库在 Supabase（云端），Worker 在本地
 # ============================================
 
 set -e
@@ -104,9 +107,19 @@ start_internal_services() {
     
     cd "$DOCKER_DIR"
     
-    # Vercel + Supabase 架构：只启动 MinIO 和 Redis
-    info "启动 MinIO 和 Redis..."
-    $COMPOSE_CMD -f "$COMPOSE_FILE" up -d minio redis minio-init
+    # 根据部署模式启动服务
+    # 完全自托管模式：启动所有服务（包括 PostgreSQL）
+    # 混合部署模式：只启动 MinIO 和 Redis
+    info "启动内网服务..."
+    
+    # 检查是否使用完全自托管模式（检查是否有 docker-compose.standalone.yml）
+    if [ -f "$DOCKER_DIR/docker-compose.standalone.yml" ]; then
+        info "检测到完全自托管模式，启动所有服务..."
+        $COMPOSE_CMD -f "$DOCKER_DIR/docker-compose.standalone.yml" up -d postgres minio redis minio-init
+    else
+        info "检测到混合部署模式，启动 MinIO 和 Redis..."
+        $COMPOSE_CMD -f "$COMPOSE_FILE" up -d minio redis minio-init
+    fi
     
     success "内网服务已启动"
 }
@@ -139,7 +152,15 @@ check_services() {
         echo -e "${RED}✗${NC}"
     fi
     
-    # 注意：数据库使用 Supabase（云端），不在此检查
+    # 检查 PostgreSQL（如果使用完全自托管模式）
+    if docker ps --format '{{.Names}}' | grep -q "^pis-postgres$"; then
+        echo -n "  PostgreSQL: "
+        if docker exec pis-postgres pg_isready -U ${DATABASE_USER:-pis} -d ${DATABASE_NAME:-pis} > /dev/null 2>&1; then
+            echo -e "${GREEN}✓${NC}"
+        else
+            echo -e "${RED}✗${NC}"
+        fi
+    fi
 }
 
 # 显示服务信息
@@ -225,7 +246,8 @@ show_service_info() {
     
     echo -e "${YELLOW}提示:${NC}"
     echo "  - 这些服务仅在内网访问（127.0.0.1）"
-    echo "  - Web 服务部署在 Vercel，数据库使用 Supabase（云端）"
+    echo "  - 完全自托管模式：所有服务都在本地（PostgreSQL + MinIO + Redis + Web + Worker）"
+    echo "  - 混合部署模式：Web 在 Vercel，数据库在 Supabase（云端），Worker 在本地"
     echo "  - Worker 服务可通过 docker compose up -d worker 启动"
     echo ""
 }

@@ -57,12 +57,12 @@ else
 fi
 echo ""
 
-# 4. 检查 Supabase 项目 URL 和密钥
+# 4. 检查 Supabase 项目 URL 和密钥（仅在混合模式下使用，不应硬编码）
 echo "4️⃣  检查 Supabase 配置..."
 SUPABASE_URLS=$(grep -r "https://[a-z0-9]\{20\}\.supabase\.co" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.next --exclude="*.md" --exclude="*.example" --exclude=".env" . 2>/dev/null || true)
 
 if [ -n "$SUPABASE_URLS" ]; then
-    echo -e "${RED}❌ 发现硬编码的 Supabase URL：${NC}"
+    echo -e "${RED}❌ 发现硬编码的 Supabase URL（应使用环境变量）：${NC}"
     echo "$SUPABASE_URLS" | head -3
     ERRORS=$((ERRORS + 1))
 else

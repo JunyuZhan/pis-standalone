@@ -10,6 +10,7 @@
 |------|------|
 | [部署指南 (中文)](./i18n/zh-CN/DEPLOYMENT.md) | 详细部署步骤和配置说明 |
 | [部署指南 (English)](./i18n/en/DEPLOYMENT.md) | Deployment guide in English |
+| [部署检查清单](./DEPLOYMENT_CHECKLIST.md) | 部署前检查清单和快速参考 |
 | [架构示例](./ARCHITECTURE.example.md) | 系统架构概览（不含敏感信息） |
 | [开发指南](./DEVELOPMENT.md) | 开发环境设置和代码规范 |
 
@@ -20,6 +21,7 @@
 | 文档 | 描述 |
 |------|------|
 | [安全指南](./SECURITY.md) | 安全最佳实践和配置建议 |
+| [开源检查清单](./OPEN_SOURCE_CHECKLIST.md) | 开源发布前检查清单 |
 
 ---
 
@@ -27,27 +29,37 @@
 
 | 文档 | 描述 |
 |------|------|
-| [图片风格预设](./IMAGE_STYLE_PRESET_DESIGN.md) | 相册风格预设功能设计 |
+| [快速开始](./QUICK_START.md) | 3 步上手指南 |
+| [用户指南](./USER_GUIDE.md) | 完整的功能使用说明 |
+| [图片风格预设设计](./IMAGE_STYLE_PRESET_DESIGN.md) | 相册风格预设功能设计 |
 | [上传队列逻辑](./UPLOAD_QUEUE_LOGIC.md) | 照片上传和处理队列说明 |
 | [移动端优化](./MOBILE_OPTIMIZATION.md) | 移动端用户体验优化 |
 | [实现状态](./IMPLEMENTATION_STATUS.md) | 功能实现进度追踪 |
 
 ---
 
-## 🚀 快速开始
+## 🔧 配置和故障排查
 
 | 文档 | 描述 |
 |------|------|
-| [快速开始](./QUICK_START.md) | 3 步上手指南 |
-| [用户指南](./USER_GUIDE.md) | 完整的功能使用说明 |
+| [字体配置指南](./FONTS.md) | 字体文件下载和配置 |
+| [环境变量配置](./ENVIRONMENT_VARIABLES.md) | 环境变量详细说明（敏感信息版本） |
+| [数据库重置](./RESET_DATABASE.md) | 数据库重置和清理 |
+| [日志配置](./LOGGING.md) | 日志系统配置 |
+| [SSL 问题修复](./SSL_FIX.md) | macOS 开发环境 SSL 证书问题 |
 
 ---
 
-## 🔧 故障排查
+## 🐳 Docker 部署相关
 
 | 文档 | 描述 |
 |------|------|
-| [SSL 问题修复](./SSL_FIX.md) | macOS 开发环境 SSL 证书问题 |
+| [Docker 容器和存储卷](./DOCKER_CONTAINERS_AND_VOLUMES.md) | 容器命名和组织说明 |
+| [Docker 网络和端口](./DOCKER_NETWORK_AND_PORTS.md) | 网络配置和端口说明 |
+| [Nginx 容器分析](./NGINX_CONTAINER_ANALYSIS.md) | Nginx 容器作用和配置 |
+| [端口冲突解决方案](./PORT_CONFLICT_SOLUTIONS.md) | 端口冲突处理方案 |
+| [Frpc/DDNSTO 配置指南](./FRPC_DDNSTO_SETUP.md) | 内网穿透配置指南 |
+| [统一入口架构](./UNIFIED_ENTRY_ARCHITECTURE.md) | 统一入口架构设计说明 |
 
 ---
 
@@ -56,22 +68,28 @@
 ```
 docs/
 ├── README.md                      # 文档索引（本文件）
+├── DEPLOYMENT_CHECKLIST.md        # 部署检查清单
+├── DEVELOPMENT.md                 # 开发指南
+├── SECURITY.md                    # 安全指南
+├── ARCHITECTURE.example.md        # 架构示例（公开版本）
+├── FONTS.md                       # 字体配置指南
+├── QUICK_START.md                 # 快速开始
+├── USER_GUIDE.md                  # 用户指南
 ├── i18n/
+│   ├── README.md
 │   ├── en/
 │   │   └── DEPLOYMENT.md          # 英文部署指南
 │   └── zh-CN/
-│       ├── DEPLOYMENT.md          # 中文部署指南
-│       └── DEPLOYMENT_STANDALONE.md  # 自托管部署指南
-├── ARCHITECTURE.example.md        # 架构示例（安全版本）
-├── DEVELOPMENT.md                 # 开发指南
-├── SECURITY.md                    # 安全指南
-├── QUICK_START.md                 # 快速开始
-├── USER_GUIDE.md                  # 用户指南
-├── IMAGE_STYLE_PRESET_DESIGN.md   # 风格预设设计
-├── UPLOAD_QUEUE_LOGIC.md          # 上传队列逻辑
-├── MOBILE_OPTIMIZATION.md         # 移动端优化
-├── IMPLEMENTATION_STATUS.md       # 实现状态
-└── SSL_FIX.md                     # SSL 问题修复
+│       └── DEPLOYMENT.md          # 中文部署指南
+├── archive/
+│   ├── migration/                 # 迁移文档（已完成，归档）
+│   └── development/               # 开发过程文档（已完成，归档）
+└── [功能文档]
+    ├── IMAGE_STYLE_PRESET_DESIGN.md
+    ├── UPLOAD_QUEUE_LOGIC.md
+    ├── MOBILE_OPTIMIZATION.md
+    ├── IMPLEMENTATION_STATUS.md
+    └── ...
 ```
 
 ---
@@ -87,6 +105,19 @@ docs/
 
 ---
 
+## 📝 文档清理说明
+
+文档已进行清理和整合：
+
+- ✅ **迁移文档**：已归档到 `archive/migration/`（迁移已完成）
+- ✅ **开发过程文档**：已归档到 `archive/development/`（开发已完成）
+- ✅ **部署文档**：已整合，删除重复文档
+- ✅ **字体文档**：已整合为 `FONTS.md`
+
+详细清理计划见：[文档清理计划](./DOCUMENTATION_CLEANUP_PLAN.md)
+
+---
+
 ## 📝 贡献
 
 如果你发现文档有错误或需要改进，欢迎提交 Issue 或 Pull Request。
@@ -95,6 +126,6 @@ docs/
 
 ## 🔗 相关链接
 
-- [GitHub 仓库](https://github.com/JunyuZhan/pis-cloud)
-- [问题反馈](https://github.com/JunyuZhan/pis-cloud/issues)
-- [功能请求](https://github.com/JunyuZhan/pis-cloud/issues/new)
+- [GitHub 仓库](https://github.com/JunyuZhan/pis-standalone)
+- [问题反馈](https://github.com/JunyuZhan/pis-standalone/issues)
+- [功能请求](https://github.com/JunyuZhan/pis-standalone/issues/new)

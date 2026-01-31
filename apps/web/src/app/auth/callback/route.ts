@@ -1,24 +1,17 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 
 /**
  * Auth Callback 路由
- * 处理 Supabase Auth 的重定向回调（如邮箱验证、OAuth 登录等）
+ * 
+ * 注意：自定义认证系统不需要此回调路由
+ * 此路由保留用于向后兼容，但不会执行任何操作
+ * 如果未来需要 OAuth 或其他第三方认证，可以在这里实现
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
-  const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/admin'
 
-  if (code) {
-    const supabase = await createClient()
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-    
-    if (!error) {
-      return NextResponse.redirect(`${origin}${next}`)
-    }
-  }
-
-  // 如果没有 code 或交换失败，重定向到登录页
-  return NextResponse.redirect(`${origin}/admin/login?error=auth_callback_error`)
+  // 自定义认证系统不需要 code 交换
+  // 直接重定向到目标页面
+  return NextResponse.redirect(`${origin}${next}`)
 }

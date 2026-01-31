@@ -1,18 +1,18 @@
 /**
- * Next.js Middleware - i18n + Supabase Auth
+ * Next.js Middleware - i18n + Custom Auth
  * 
  * @author junyuzhan <junyuzhan@outlook.com>
  * @license MIT
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
-import { updateSession } from '@/lib/supabase/middleware'
+import { updateSession } from '@/lib/auth/middleware'
 import { locales, defaultLocale, type Locale } from './i18n/config'
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
-  // Handle Supabase auth for admin API routes (refresh session for API calls)
+  // Handle custom auth for admin API routes (refresh session for API calls)
   if (pathname.startsWith('/api/admin')) {
     return await updateSession(request)
   }
@@ -36,7 +36,7 @@ export async function middleware(request: NextRequest) {
     locale = localeCookie as Locale
   }
 
-  // Handle Supabase auth for admin routes first (takes priority over locale)
+  // Handle custom auth for admin routes first (takes priority over locale)
   if (pathname.startsWith('/admin')) {
     const authResponse = await updateSession(request)
     

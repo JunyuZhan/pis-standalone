@@ -51,8 +51,11 @@ if [ -z "$SSH_CONNECTION" ] && [ "$FORCE" != true ]; then
   fi
 fi
 
-# 项目目录（自动检测）
-if [ -d "/opt/pis" ]; then
+# 项目目录（自动检测，支持环境变量）
+if [ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ]; then
+  # 使用环境变量指定的目录
+  :
+elif [ -d "/opt/pis" ]; then
   PROJECT_DIR="/opt/pis"
 elif [ -d "/opt/PIS" ]; then
   PROJECT_DIR="/opt/PIS"
@@ -60,8 +63,13 @@ elif [ -d "/root/pis" ]; then
   PROJECT_DIR="/root/pis"
 elif [ -d "/root/PIS" ]; then
   PROJECT_DIR="/root/PIS"
+elif [ -d "$(dirname "$0")/.." ]; then
+  # 使用脚本所在目录的父目录
+  PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 else
-  echo "❌ 未找到项目目录，请手动指定 PROJECT_DIR"
+  echo "❌ 未找到项目目录"
+  echo "   请设置 PROJECT_DIR 环境变量或确保在项目目录中运行"
+  echo "   例如: PROJECT_DIR=/path/to/pis-standalone bash scripts/update-worker-on-server.sh"
   exit 1
 fi
 

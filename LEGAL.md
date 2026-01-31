@@ -24,10 +24,13 @@ This project uses the following open-source libraries:
 
 - Next.js - MIT License
 - React - MIT License
-- Supabase - Apache 2.0 License
+- PostgreSQL - PostgreSQL License (PostgreSQL License)
 - MinIO - Apache 2.0 License
 - Sharp - Apache 2.0 License
 - Tailwind CSS - MIT License
+
+**Optional (for hybrid deployment mode):**
+- Supabase - Apache 2.0 License (optional, only used in hybrid deployment mode)
 
 See individual package.json files for complete dependency lists and their respective licenses.
 

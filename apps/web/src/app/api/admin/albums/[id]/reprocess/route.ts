@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { reprocessAlbumSchema, albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -28,31 +31,30 @@ interface RouteParams {
  * - 500: 服务器错误
  * 
  * @security
- * - 需要用户认证（Supabase Auth）
+ * - 需要用户认证（自定义认证）
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
-
-    // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
-    }
-
-    // 解析请求体
-    interface ReprocessRequestBody {
-      apply_color_grading?: boolean  // 是否应用调色配置
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
     }
     
-    let body: ReprocessRequestBody = {}
+    const { id } = idValidation.data
+    const db = await createClient()
+
+    // 验证登录状态
+    const user = await getCurrentUser(request)
+
+    if (!user) {
+      return ApiError.unauthorized('请先登录')
+    }
+
+    // 解析和验证请求体（允许空请求体）
+    let body: unknown = {}
     try {
       const bodyText = await request.text()
       if (bodyText) {
@@ -63,27 +65,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       body = { apply_color_grading: true }
     }
 
+    const bodyValidation = safeValidate(reprocessAlbumSchema, body)
+    if (!bodyValidation.success) {
+      return handleError(bodyValidation.error, '输入验证失败')
+    }
+
     // apply_color_grading 参数保留用于未来扩展，当前总是应用调色配置
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const _apply_color_grading = body.apply_color_grading ?? true
+    const _apply_color_grading = bodyValidation.data.apply_color_grading ?? true
 
     // 验证相册存在
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, photo_count')
       .eq('id', id)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'ALBUM_NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
     // 获取需要重新处理的照片
-    const { data: photos, error: photosError } = await supabase
+    const photosResult = await db
       .from('photos')
       .select('id, album_id, original_key, status')
       .eq('album_id', id)
@@ -91,19 +95,14 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .not('original_key', 'is', null)
       .is('deleted_at', null)
 
-    if (photosError) {
-      console.error('Query photos error:', photosError)
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: photosError.message } },
-        { status: 500 }
-      )
+    if (photosResult.error) {
+      return ApiError.internal(`数据库错误: ${photosResult.error.message}`)
     }
 
+    const photos = photosResult.data || []
+
     if (!photos || photos.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'NO_PHOTOS', message: '相册中没有需要重新处理的照片' } },
-        { status: 400 }
-      )
+      return ApiError.badRequest('相册中没有需要重新处理的照片')
     }
 
     // 使用现有的重新处理 API
@@ -124,10 +123,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!reprocessResponse.ok) {
       const errorData = await reprocessResponse.json().catch(() => ({}))
-      return NextResponse.json(
-        { error: { code: 'REPROCESS_ERROR', message: errorData.error?.message || '重新处理失败' } },
-        { status: reprocessResponse.status }
-      )
+      return ApiError.internal(errorData.error?.message || '重新处理失败')
     }
 
     const result = await reprocessResponse.json()
@@ -141,17 +137,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       estimated_time: estimatedMinutes <= 1 ? '1 分钟' : `${estimatedMinutes}-${estimatedMinutes + 1} 分钟`,
     })
   } catch (error) {
-    console.error('[Album Reprocess API] Error:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
-
-    return NextResponse.json(
-      {
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: errorMessage,
-        },
-      },
-      { status: 500 }
-    )
+    return handleError(error, '重新处理相册失败')
   }
 }

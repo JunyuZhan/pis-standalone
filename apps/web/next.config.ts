@@ -132,13 +132,13 @@ const nextConfig: NextConfig = {
       }
     }
     
-    // 从环境变量获取 Supabase URL，用于 WebSocket 连接
+    // 从环境变量获取 Supabase URL，用于 WebSocket 连接（向后兼容，仅在混合模式下使用）
     let supabaseOrigins: string[] = []
     if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
       try {
         const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL)
         const hostname = supabaseUrl.hostname
-        // 添加 Supabase 域名（支持 HTTPS 和 WSS）
+        // 添加 Supabase 域名（支持 HTTPS 和 WSS）- 仅在混合模式下需要
         supabaseOrigins = [
           `https://${hostname}`,
           `wss://${hostname}`
@@ -148,13 +148,13 @@ const nextConfig: NextConfig = {
       }
     }
     
-    // 构建 CSP connect-src，包含媒体服务器和 Supabase（HTTP、HTTPS 和 WSS）
+    // 构建 CSP connect-src，包含媒体服务器（PostgreSQL 模式下不需要 Supabase）
     const connectSrc = [
       "'self'",
       'https:',
       'wss:', // 允许所有 WebSocket 安全连接
       ...mediaOrigins,
-      ...supabaseOrigins
+      ...supabaseOrigins // 仅在混合模式下添加
     ].join(' ')
     
     return [

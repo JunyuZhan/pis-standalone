@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { restoreSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 恢复已删除的照片
@@ -13,80 +16,56 @@ import { createClient, createAdminClient } from '@/lib/supabase/server'
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const adminClient = createAdminClient()
+    const db = await createClient()
+    const adminClient = await createAdminClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface RestorePhotosRequestBody {
-      photoIds: string[]
-    }
-    let body: RestorePhotosRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
 
-    const { photoIds } = body
-
-    if (!Array.isArray(photoIds) || photoIds.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '请选择要恢复的照片' } },
-        { status: 400 }
-      )
+    // 验证输入
+    const validation = safeValidate(restoreSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
 
-    // 限制批量恢复数量
-    if (photoIds.length > 100) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '单次最多恢复100张照片' } },
-        { status: 400 }
-      )
-    }
+    const { photoIds } = validation.data
 
     // 验证照片存在且已删除
-    const { data: deletedPhotos, error: checkError } = await adminClient
+    const deletedPhotosResult = await adminClient
       .from('photos')
       .select('id, album_id, deleted_at')
       .in('id', photoIds)
       .not('deleted_at', 'is', null)
 
-    if (checkError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: checkError.message } },
-        { status: 500 }
-      )
+    if (deletedPhotosResult.error) {
+      return handleError(deletedPhotosResult.error, '查询照片记录失败')
     }
 
+    const deletedPhotos = deletedPhotosResult.data
+
     if (!deletedPhotos || deletedPhotos.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '未找到已删除的照片' } },
-        { status: 404 }
-      )
+      return ApiError.notFound('未找到已删除的照片')
     }
 
     const validPhotoIds = deletedPhotos.map(p => p.id)
 
     // 恢复照片：清除 deleted_at
-    const { error: restoreError } = await adminClient
-      .from('photos')
-      .update({ deleted_at: null })
-      .in('id', validPhotoIds)
+    // 批量更新：为每个照片ID执行更新操作
+    const restorePromises = validPhotoIds.map((id) => adminClient.update('photos', { deleted_at: null }, { id }))
+    const restoreResults = await Promise.all(restorePromises)
+    const restoreError = restoreResults.find((r) => r.error)?.error
 
     if (restoreError) {
       return NextResponse.json(
@@ -96,17 +75,24 @@ export async function POST(request: NextRequest) {
     }
 
     // 更新相册照片计数（重新统计 completed 状态且未删除的照片）
-    const albumIds = [...new Set(deletedPhotos.map(p => p.album_id))]
+    interface PhotoWithAlbumId {
+      album_id: string
+    }
+    interface AlbumWithSlug {
+      id: string
+      slug: string | null
+    }
+    const albumIds = [...new Set((deletedPhotos as PhotoWithAlbumId[]).map((p) => p.album_id))]
     const albumSlugs = new Map<string, string>()
     
     // 批量获取相册slug
-    const { data: albumsData } = await adminClient
+    const albumsResult = await adminClient
       .from('albums')
       .select('id, slug')
       .in('id', albumIds)
     
-    if (albumsData) {
-      albumsData.forEach(album => {
+    if (albumsResult.data) {
+      (albumsResult.data as AlbumWithSlug[]).forEach((album) => {
         if (album.slug) {
           albumSlugs.set(album.id, album.slug)
         }
@@ -114,17 +100,15 @@ export async function POST(request: NextRequest) {
     }
     
     for (const albumId of albumIds) {
-      const { count: actualPhotoCount } = await adminClient
+      const countResult = await adminClient
         .from('photos')
-        .select('*', { count: 'exact', head: true })
+        .select('*')
         .eq('album_id', albumId)
         .eq('status', 'completed')
         .is('deleted_at', null)
 
-      await adminClient
-        .from('albums')
-        .update({ photo_count: actualPhotoCount ?? 0 })
-        .eq('id', albumId)
+      const actualPhotoCount = countResult.count || countResult.data?.length || 0
+      await adminClient.update('albums', { photo_count: actualPhotoCount }, { id: albumId })
     }
 
     // 清除 Next.js/Vercel 路由缓存，确保前端立即看到更新
@@ -147,15 +131,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       restoredCount: validPhotoIds.length,
       message: `已恢复 ${validPhotoIds.length} 张照片`,
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '恢复照片失败')
   }
 }

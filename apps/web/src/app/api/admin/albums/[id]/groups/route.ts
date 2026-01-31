@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import type { PhotoGroupInsert } from '@/types/database'
+import { albumIdSchema, createGroupSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -16,149 +18,134 @@ interface RouteParams {
 // GET /api/admin/albums/[id]/groups - 获取分组列表
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id: albumId } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id: albumId } = idValidation.data
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 验证相册存在
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id')
       .eq('id', albumId)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
     // 获取分组列表
-    const { data: groups, error: groupsError } = await supabase
+    const groupsResult = await db
       .from('photo_groups')
       .select('*')
       .eq('album_id', albumId)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
 
-    if (groupsError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: groupsError.message } },
-        { status: 500 }
-      )
+    if (groupsResult.error) {
+      return handleError(groupsResult.error, '查询分组列表失败')
     }
+
+    const groups = groupsResult.data || []
 
     // 获取每个分组的照片数量
     const groupsWithCounts = await Promise.all(
-      (groups || []).map(async (group) => {
-        const { count } = await supabase
+      groups.map(async (group: { id: string }) => {
+        const countResult = await db
           .from('photo_group_assignments')
-          .select('*', { count: 'exact', head: true })
+          .select('*')
           .eq('group_id', group.id)
+
+        const count = countResult.count || countResult.data?.length || 0
 
         return {
           ...group,
-          photo_count: count || 0,
+          photo_count: count,
         }
       })
     )
 
-    return NextResponse.json({ groups: groupsWithCounts })
-  } catch {
-    console.error('Groups API error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return createSuccessResponse({ groups: groupsWithCounts })
+  } catch (error) {
+    return handleError(error, '获取分组列表失败')
   }
 }
 
 // POST /api/admin/albums/[id]/groups - 创建新分组
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id: albumId } = await params
-    const supabase = await createClient()
-    const supabaseAdmin = createAdminClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id: albumId } = idValidation.data
+    const db = await createClient()
+    const dbAdmin = await createAdminClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 验证相册存在
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id')
       .eq('id', albumId)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
-    // 解析请求体
-    interface CreateRequestBody {
-      name: string
-      description?: string | null
-      sort_order?: number
-    }
-    let body: CreateRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
-    
-    const { name, description, sort_order } = body
 
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '分组名称不能为空' } },
-        { status: 400 }
-      )
+    // 验证输入（需要添加 albumId 到 body 中）
+    const bodyWithAlbumId = { ...(body as Record<string, unknown>), albumId }
+    const validation = safeValidate(createGroupSchema, bodyWithAlbumId)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
+
+    const { name, description } = validation.data
 
     // 检查分组名称是否已存在
-    const { data: existingGroup } = await supabase
+    const existingGroupResult = await db
       .from('photo_groups')
       .select('id')
       .eq('album_id', albumId)
       .eq('name', name.trim())
       .single()
 
-    if (existingGroup) {
-      return NextResponse.json(
-        { error: { code: 'DUPLICATE_ERROR', message: '分组名称已存在' } },
-        { status: 409 }
-      )
+    if (existingGroupResult.data) {
+      return ApiError.conflict('分组名称已存在')
     }
 
     // 创建分组
@@ -166,33 +153,24 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       album_id: albumId,
       name: name.trim(),
       description: description?.trim() || null,
-      sort_order: sort_order ?? 0,
+      sort_order: 0,
     }
 
-    const { data: newGroup, error: insertError } = await supabaseAdmin
-      .from('photo_groups')
-      .insert(insertData)
-      .select()
-      .single()
+    const insertResult = await dbAdmin.insert('photo_groups', insertData)
 
-    if (insertError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: insertError.message } },
-        { status: 500 }
-      )
+    if (insertResult.error) {
+      return handleError(insertResult.error, '创建分组失败')
     }
 
-    return NextResponse.json({
+    const newGroup = insertResult.data && insertResult.data.length > 0 ? insertResult.data[0] : null
+
+    return createSuccessResponse({
       group: {
         ...newGroup,
         photo_count: 0,
       },
     })
-  } catch {
-    console.error('Create group API error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '创建分组失败')
   }
 }

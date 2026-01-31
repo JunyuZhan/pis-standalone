@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClientFromRequest, createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import { v4 as uuidv4 } from 'uuid'
 import { checkRateLimit } from '@/middleware-rate-limit'
+import { uploadPhotoSchema, albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -10,40 +13,49 @@ interface RouteParams {
 /**
  * 获取上传凭证 API
  * 
- * 为客户端生成 Presigned URL，用于直接上传文件到 MinIO 存储。
- * 
  * @route POST /api/admin/albums/[id]/upload
+ * @description 为客户端生成 Presigned URL，用于直接上传文件到 MinIO 存储
  * 
- * @param request - Next.js 请求对象
- * @param params - 路由参数，包含相册 ID
- * @param params.id - 相册 ID
- * 
- * @requestBody
- * {
- *   "filename": "photo.jpg",        // 文件名（必需）
- *   "contentType": "image/jpeg",    // MIME 类型（必需）
- *   "fileSize": 1024000             // 文件大小（字节，可选）
- * }
- * 
- * @returns
- * - 200: 成功返回上传凭证
- *   {
- *     "photoId": "uuid",
- *     "uploadUrl": "https://your-storage-domain.com/presigned-url",
- *     "originalKey": "raw/album-id/photo-id.jpg",
- *     "albumId": "album-id"
- *   }
- * - 400: 请求参数错误
- * - 401: 未授权（未登录或认证失败）
- * - 404: 相册不存在
- * - 429: 速率限制
- * - 500: 服务器错误
+ * @auth 需要管理员登录
  * 
  * @security
- * - 需要用户认证（Supabase Auth）
  * - 速率限制：每个用户每分钟最多 20 次请求
  * - 文件类型限制：仅支持 image/jpeg, image/png, image/heic, image/webp, image/gif, image/tiff
  * - 文件大小限制：最大 100MB
+ * 
+ * @param {string} id - 相册ID（UUID格式）
+ * 
+ * @body {Object} requestBody - 上传请求体
+ * @body {string} requestBody.filename - 文件名（必填）
+ * @body {string} requestBody.contentType - MIME 类型（必填，必须是支持的图片类型）
+ * @body {number} [requestBody.fileSize] - 文件大小（字节，可选，用于验证）
+ * 
+ * @returns {Object} 200 - 成功返回上传凭证
+ * @returns {string} 200.data.photoId - 照片ID（UUID）
+ * @returns {string} 200.data.uploadUrl - Presigned URL（用于上传文件）
+ * @returns {string} 200.data.originalKey - 原始文件在存储中的键名
+ * @returns {string} 200.data.albumId - 相册ID
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败或文件类型不支持）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 404 - 相册不存在
+ * @returns {Object} 429 - 请求过于频繁（速率限制）
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @example
+ * ```typescript
+ * const response = await fetch('/api/admin/albums/album-id/upload', {
+ *   method: 'POST',
+ *   headers: { 'Content-Type': 'application/json' },
+ *   body: JSON.stringify({
+ *     filename: 'photo.jpg',
+ *     contentType: 'image/jpeg',
+ *     fileSize: 1024000
+ *   })
+ * })
+ * const { photoId, uploadUrl } = await response.json()
+ * // 使用 uploadUrl 上传文件到存储
+ * ```
  * 
  * @example
  * ```typescript
@@ -65,44 +77,22 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   let photoId: string | null = null
   
   try {
-    let albumId: string
-    try {
-      const paramsResult = await params
-      albumId = paramsResult.id
-    } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_PARAMS', message: '无效的请求参数' } },
-        { status: 400 }
-      )
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
     }
     
+    const albumId = idValidation.data.id
     response = new NextResponse()
-    const supabase = createClientFromRequest(request, response)
 
     // 验证登录状态
-    let user
-    try {
-      const userResult = await supabase.auth.getUser()
-      user = userResult.data.user
-    } catch (authError) {
-      console.error('[Upload API] Auth error:', authError)
-      return NextResponse.json(
-        { error: { code: 'AUTH_ERROR', message: '认证失败' } },
-        { 
-          status: 401,
-          headers: response.headers,
-        }
-      )
-    }
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { 
-          status: 401,
-          headers: response ? response.headers : {},
-        }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 速率限制：每个用户每分钟最多 20 次上传请求
@@ -132,53 +122,32 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // 验证相册存在
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id')
       .eq('id', albumId)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'ALBUM_NOT_FOUND', message: '相册不存在' } },
-        { 
-          status: 404,
-          headers: response.headers,
-        }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
-    // 解析请求体
-    interface UploadRequestBody {
-      filename: string
-      contentType: string
-      fileSize?: number
-    }
-    let body: UploadRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { 
-          status: 400,
-          headers: response.headers,
-        }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
-    
-    const { filename, contentType, fileSize } = body
 
-    if (!filename || !contentType) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '缺少必要参数' } },
-        { 
-          status: 400,
-          headers: response.headers,
-        }
-      )
+    // 验证输入
+    const validation = safeValidate(uploadPhotoSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
+
+    const { filename, contentType, fileSize } = validation.data
 
     // 清理和验证文件名（防止路径遍历、注入攻击）
     // 1. 移除路径分隔符和特殊字符（防止路径遍历）
@@ -191,34 +160,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     // 2. 验证文件名长度（防止DoS攻击）
     const MAX_FILENAME_LENGTH = 255 // 标准文件名长度限制
     if (!sanitizedFilename || sanitizedFilename.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'INVALID_FILENAME', message: '文件名无效' } },
-        { 
-          status: 400,
-          headers: response.headers,
-        }
-      )
+      return ApiError.badRequest('文件名无效')
     }
     
     if (sanitizedFilename.length > MAX_FILENAME_LENGTH) {
-      return NextResponse.json(
-        { error: { code: 'FILENAME_TOO_LONG', message: `文件名过长（最大 ${MAX_FILENAME_LENGTH} 字符）` } },
-        { 
-          status: 400,
-          headers: response.headers,
-        }
-      )
+      return ApiError.badRequest(`文件名过长（最大 ${MAX_FILENAME_LENGTH} 字符）`)
     }
     
     // 3. 验证文件名不包含路径遍历字符
     if (sanitizedFilename.includes('..') || sanitizedFilename.includes('../') || sanitizedFilename.includes('..\\')) {
-      return NextResponse.json(
-        { error: { code: 'INVALID_FILENAME', message: '文件名包含非法字符' } },
-        { 
-          status: 400,
-          headers: response.headers,
-        }
-      )
+      return ApiError.badRequest('文件名包含非法字符')
     }
 
     // 验证文件类型（双重验证：MIME 类型 + 文件扩展名）
@@ -285,22 +236,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const originalKey = `raw/${albumId}/${photoId}.${ext}`
 
     // 创建照片记录 (状态为 pending)
-    const adminClient = createAdminClient()
-    const { error: insertError } = await adminClient
-      .from('photos')
-      .insert({
-        id: photoId,
-        album_id: albumId,
-        original_key: originalKey,
-        filename: sanitizedFilename, // 使用清理后的文件名
-        file_size: fileSize,
-        mime_type: contentType,
-        status: 'pending',
-      })
+    const adminClient = await createAdminClient()
+    const insertResult = await adminClient.insert('photos', {
+      id: photoId,
+      album_id: albumId,
+      original_key: originalKey,
+      filename: sanitizedFilename, // 使用清理后的文件名
+      file_size: fileSize,
+      mime_type: contentType,
+      status: 'pending',
+    })
 
-    if (insertError) {
+    if (insertResult.error) {
       return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: insertError.message } },
+        { error: { code: 'DB_ERROR', message: insertResult.error.message } },
         { 
           status: 500,
           headers: response.headers,

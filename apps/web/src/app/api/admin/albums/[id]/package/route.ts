@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { packageDownloadSchema, packageIdQuerySchema, albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
+}
+
+interface PhotoWithId {
+  id: string
 }
 
 /**
@@ -14,74 +21,68 @@ interface RouteParams {
 // POST /api/admin/albums/[id]/package - 创建打包下载任务
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface PackageRequestBody {
-      photoIds?: string[]
-      photoSelection?: 'all' | 'selected' | 'custom'
-      includeWatermarked?: boolean
-      includeOriginal?: boolean
-    }
-    let body: PackageRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误')
     }
-    
+
+    const bodyValidation = safeValidate(packageDownloadSchema, body)
+    if (!bodyValidation.success) {
+      return handleError(bodyValidation.error, '输入验证失败')
+    }
+
     const {
-      photoIds, // 照片ID数组，如果为空则使用所有照片或已选照片
-      photoSelection = 'all', // 'all' | 'selected' | 'custom'
+      photoIds,
+      photoSelection = 'all',
       includeWatermarked = true,
       includeOriginal = true,
-    } = body
+    } = bodyValidation.data
 
     // 验证相册存在
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, title, allow_download')
       .eq('id', id)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
-    }
+        if (albumResult.error || !albumResult.data) {
+          return ApiError.notFound('相册不存在')
+        }
 
-    if (!album.allow_download) {
-      return NextResponse.json(
-        { error: { code: 'FORBIDDEN', message: '此相册不允许下载' } },
-        { status: 403 }
-      )
-    }
+        const album = albumResult.data
+
+        if (!album.allow_download) {
+          return ApiError.forbidden('此相册不允许下载')
+        }
 
     // 确定要打包的照片
     let finalPhotoIds: string[] = []
 
     if (photoSelection === 'selected') {
       // 获取已选照片（排除已删除的）
-      const { data: selectedPhotos } = await supabase
+      const selectedPhotosResult = await db
         .from('photos')
         .select('id')
         .eq('album_id', id)
@@ -89,55 +90,48 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         .eq('status', 'completed')
         .is('deleted_at', null)
 
-      finalPhotoIds = selectedPhotos?.map(p => p.id) || []
+      finalPhotoIds = ((selectedPhotosResult.data || []) as PhotoWithId[]).map((p) => p.id)
     } else if (photoSelection === 'custom' && Array.isArray(photoIds)) {
       finalPhotoIds = photoIds
     } else {
       // 获取所有照片（排除已删除的）
-      const { data: allPhotos } = await supabase
+      const allPhotosResult = await db
         .from('photos')
         .select('id')
         .eq('album_id', id)
         .eq('status', 'completed')
         .is('deleted_at', null)
 
-      finalPhotoIds = allPhotos?.map(p => p.id) || []
+      finalPhotoIds = ((allPhotosResult.data || []) as PhotoWithId[]).map((p) => p.id)
     }
 
-    if (finalPhotoIds.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '没有可打包的照片' } },
-        { status: 400 }
-      )
-    }
+        if (finalPhotoIds.length === 0) {
+          return ApiError.badRequest('没有可打包的照片')
+        }
 
-    // 限制打包数量
-    if (finalPhotoIds.length > 500) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '单次最多打包500张照片' } },
-        { status: 400 }
-      )
-    }
+        // 限制打包数量
+        if (finalPhotoIds.length > 500) {
+          return ApiError.badRequest('单次最多打包500张照片')
+        }
 
     // 创建打包任务记录
-    const { data: packageData, error: packageError } = await supabase
-      .from('package_downloads')
-      .insert({
-        album_id: id,
-        photo_ids: finalPhotoIds,
-        include_watermarked: includeWatermarked,
-        include_original: includeOriginal,
-        status: 'pending',
-      })
-      .select()
-      .single()
+    const insertResult = await db.insert('package_downloads', {
+      album_id: id,
+      photo_ids: finalPhotoIds,
+      include_watermarked: includeWatermarked,
+      include_original: includeOriginal,
+      status: 'pending',
+    })
 
-    if (packageError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: packageError.message } },
-        { status: 500 }
-      )
-    }
+        if (insertResult.error) {
+          return ApiError.internal(`数据库错误: ${insertResult.error.message}`)
+        }
+
+        const packageData = insertResult.data && insertResult.data.length > 0 ? insertResult.data[0] : null
+
+        if (!packageData) {
+          return ApiError.internal('创建打包任务失败')
+        }
 
     // 触发 Worker 处理
     const workerUrl = process.env.NEXT_PUBLIC_WORKER_URL || 'http://localhost:3001'
@@ -168,64 +162,55 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       status: 'pending',
       message: '打包任务已创建，正在处理中...',
     })
-  } catch {
-    console.error('Package creation error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '创建打包任务失败')
   }
 }
 
 // GET /api/admin/albums/[id]/package/[packageId] - 获取打包状态
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id } = idValidation.data
     const { searchParams } = new URL(request.url)
     const packageId = searchParams.get('packageId')
 
-    if (!packageId) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '缺少 packageId 参数' } },
-        { status: 400 }
-      )
+    // 验证查询参数
+    const queryValidation = safeValidate(packageIdQuerySchema, { packageId })
+    if (!queryValidation.success) {
+      return handleError(queryValidation.error, '缺少或无效的 packageId 参数')
     }
 
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 获取打包任务信息
-    const { data: packageData, error } = await supabase
+    const packageResult = await db
       .from('package_downloads')
       .select('*')
-      .eq('id', packageId)
+      .eq('id', queryValidation.data.packageId)
       .eq('album_id', id)
       .single()
 
-    if (error || !packageData) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '打包任务不存在' } },
-        { status: 404 }
-      )
+    if (packageResult.error || !packageResult.data) {
+      return ApiError.notFound('打包任务不存在')
     }
 
-    return NextResponse.json(packageData)
-  } catch {
-    console.error('Get package error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return NextResponse.json(packageResult.data)
+  } catch (error) {
+    return handleError(error, '获取打包任务失败')
   }
 }

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -19,50 +22,50 @@ interface FileInfo {
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id: albumId } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const albumId = idValidation.data.id
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 验证相册存在
-    const { data: albumData, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, title')
       .eq('id', albumId)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !albumData) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
     // 查询数据库中的所有照片记录（排除已删除的）
-    const adminClient = createAdminClient()
-    const { data: dbPhotos, error: dbError } = await adminClient
+    const adminClient = await createAdminClient()
+    const dbPhotosResult = await adminClient
       .from('photos')
       .select('id, original_key, thumb_key, preview_key, filename, status')
       .eq('album_id', albumId)
       .is('deleted_at', null)
 
-    if (dbError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: dbError.message } },
-        { status: 500 }
-      )
+    if (dbPhotosResult.error) {
+      return ApiError.internal(`数据库错误: ${dbPhotosResult.error.message}`)
     }
+
+    const dbPhotos = dbPhotosResult.data || []
+    const albumData = albumResult.data
 
     // 使用代理路由调用 Worker API 检查 MinIO 中的文件
     // 代理路由会自动处理 Worker URL 配置和认证
@@ -180,11 +183,6 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
     })
   } catch (error) {
-    console.error('[Check Storage] API error:', error)
-    const errorMessage = error instanceof Error ? error.message : '服务器错误'
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: errorMessage } },
-      { status: 500 }
-    )
+    return handleError(error, '检查存储失败')
   }
 }

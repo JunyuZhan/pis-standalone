@@ -34,6 +34,10 @@ volumes:
     name: pis_redis_data
   pis_nginx_logs:
     name: pis_nginx_logs
+  pis_worker_logs:
+    name: pis_worker_logs
+  pis_web_logs:
+    name: pis_web_logs
   # Let's Encrypt 证书（使用 certbot 时自动创建）
   pis_certs:
     name: pis_certs
@@ -54,7 +58,7 @@ services:
     volumes:
       - pis_postgres_data:/var/lib/postgresql/data
       # 数据库初始化脚本（如果需要）
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+      - ./init-postgresql-db.sql:/docker-entrypoint-initdb.d/init-postgresql-db.sql:ro
     ports:
       - "127.0.0.1:5432:5432"
     restart: unless-stopped
@@ -215,12 +219,15 @@ services:
         NEXT_PUBLIC_PHOTOGRAPHER_TAGLINE: ${NEXT_PUBLIC_PHOTOGRAPHER_TAGLINE:-专业活动摄影}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+        NEXT_PUBLIC_POLLING_INTERVAL: ${NEXT_PUBLIC_POLLING_INTERVAL:-3000}
+        NEXT_PUBLIC_ADMIN_POLLING_INTERVAL: ${NEXT_PUBLIC_ADMIN_POLLING_INTERVAL:-2000}
     container_name: pis-web
     env_file:
       - ../.env
     environment:
-      # 认证模式（custom = 自定义认证，留空 = Supabase）
-      - AUTH_MODE=${AUTH_MODE:-}
+      # 认证模式（custom = 自定义认证，推荐；留空 = Supabase，向后兼容）
+      - AUTH_MODE=${AUTH_MODE:-custom}
+      - AUTH_JWT_SECRET=${AUTH_JWT_SECRET}
       # 数据库连接
       - DATABASE_TYPE=${DATABASE_TYPE:-postgresql}
       - DATABASE_HOST=postgres
@@ -244,6 +251,14 @@ services:
       - WORKER_API_KEY=${WORKER_API_KEY:-changeme}
       # 会话密钥（必须设置）
       - ALBUM_SESSION_SECRET=${ALBUM_SESSION_SECRET}
+      # 轮询配置（替代 Supabase Realtime）
+      - NEXT_PUBLIC_POLLING_INTERVAL=${NEXT_PUBLIC_POLLING_INTERVAL:-3000}
+      - NEXT_PUBLIC_ADMIN_POLLING_INTERVAL=${NEXT_PUBLIC_ADMIN_POLLING_INTERVAL:-2000}
+      # 日志配置
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENABLE_PRETTY_LOG=${ENABLE_PRETTY_LOG:-false}
+    volumes:
+      - pis_web_logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -269,8 +284,9 @@ services:
       - pis_nginx_logs:/var/log/nginx
       - pis_certs:/etc/letsencrypt:ro
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:80"    # HTTP 使用 8080（配合 frpc/ddnsto 内网穿透）
+      # HTTPS 由内网穿透服务处理，不需要暴露 443
+      # - "443:443"
     depends_on:
       - web
       - minio

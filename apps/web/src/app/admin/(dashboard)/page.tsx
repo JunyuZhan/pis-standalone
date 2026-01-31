@@ -1,5 +1,5 @@
 import { Suspense } from 'react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
 import { AlbumList } from '@/components/admin/album-list'
 import { AlbumCardSkeleton } from '@/components/ui/skeleton'
 
@@ -7,28 +7,30 @@ import { AlbumCardSkeleton } from '@/components/ui/skeleton'
  * 相册列表页 (管理后台首页)
  */
 export default async function AdminPage() {
-  const supabase = await createClient()
+  const db = await createClient()
 
   // 获取相册列表
-  const { data: albumsData } = await supabase
+  const albumsResult = await db
     .from('albums')
     .select('*')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
 
+  const albumsData = albumsResult.data || []
+
   // 获取封面图的 key（只获取已处理完成的照片）
-  const coverPhotoIds = albumsData?.map((a) => a.cover_photo_id).filter(Boolean) || []
+  const coverPhotoIds = albumsData.map((a: any) => a.cover_photo_id).filter(Boolean) || []
   let coverPhotosMap: Record<string, string> = {}
 
   if (coverPhotoIds.length > 0) {
-    const { data: photos } = await supabase
+    const photosResult = await db
       .from('photos')
       .select('id, thumb_key, status')
       .in('id', coverPhotoIds)
-      .eq('status', 'completed') // 只获取已处理完成的照片
+      .eq('status', 'completed')
 
-    if (photos) {
-      coverPhotosMap = photos.reduce((acc, photo) => {
+    if (photosResult.data) {
+      coverPhotosMap = photosResult.data.reduce((acc: Record<string, string>, photo: any) => {
         if (photo.thumb_key) {
           acc[photo.id] = photo.thumb_key
         }
@@ -38,28 +40,28 @@ export default async function AdminPage() {
   }
 
   // 统计每个相册的实际 completed 照片数量
-  const albumIds = albumsData?.map((a) => a.id) || []
+  const albumIds = albumsData.map((a: any) => a.id) || []
   const photoCountMap: Record<string, number> = {}
   const albumsToUpdate: { id: string; count: number }[] = []
 
   if (albumIds.length > 0) {
     // 使用分组查询统计每个相册的照片数量（排除已删除的照片）
-    const { data: photoCounts } = await supabase
+    const photoCountsResult = await db
       .from('photos')
       .select('album_id')
       .in('album_id', albumIds)
       .eq('status', 'completed')
-      .is('deleted_at', null) // 排除已删除的照片
+      .is('deleted_at', null)
 
-    if (photoCounts) {
+    if (photoCountsResult.data) {
       // 统计每个相册的照片数量
-      photoCounts.forEach((p) => {
+      photoCountsResult.data.forEach((p: any) => {
         photoCountMap[p.album_id] = (photoCountMap[p.album_id] || 0) + 1
       })
     }
 
     // 检查哪些相册的计数不一致
-    albumsData?.forEach((album) => {
+    albumsData.forEach((album: any) => {
       const actualCount = photoCountMap[album.id] || 0
       if (actualCount !== album.photo_count) {
         albumsToUpdate.push({ id: album.id, count: actualCount })
@@ -68,18 +70,15 @@ export default async function AdminPage() {
 
     // 批量更新不一致的相册计数
     for (const { id, count } of albumsToUpdate) {
-      await supabase
-        .from('albums')
-        .update({ photo_count: count })
-        .eq('id', id)
+      await db.update('albums', { photo_count: count }, { id })
     }
   }
 
-  const albums = albumsData?.map((album) => ({
+  const albums = albumsData.map((album: any) => ({
     ...album,
     photo_count: photoCountMap[album.id] ?? album.photo_count ?? 0,
     cover_thumb_key: album.cover_photo_id ? coverPhotosMap[album.cover_photo_id] : null,
-  })) || []
+  }))
 
   return (
     <Suspense fallback={<AlbumListSkeleton />}>

@@ -1,81 +1,105 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { createAdminClient } from '@/lib/supabase/admin'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { rotatePhotoSchema, photoIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 照片旋转 API
- * PATCH /api/admin/photos/[id]/rotate - 更新照片旋转角度
+ * 
+ * @route PATCH /api/admin/photos/[id]/rotate
+ * @description 更新照片的旋转角度（0、90、180、270度）
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @param {string} id - 照片ID（UUID格式）
+ * 
+ * @body {Object} requestBody - 旋转请求体
+ * @body {number} requestBody.rotation - 旋转角度（0、90、180、270，必填）
+ * 
+ * @returns {Object} 200 - 旋转更新成功
+ * @returns {Object} 200.data - 更新后的照片数据
+ * @returns {number} 200.data.rotation - 新的旋转角度
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败或无效的旋转角度）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 404 - 照片不存在
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @note 旋转角度必须是 0、90、180、270 之一
  */
-
 interface RouteParams {
   params: Promise<{ id: string }>
 }
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
-    const supabaseAdmin = createAdminClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(photoIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的照片ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
+    const dbAdmin = await createAdminClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface RotateRequestBody {
-      rotation: number | null
-    }
-    let body: RotateRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
-    
-    const { rotation } = body
 
-    // 验证 rotation 值
-    if (rotation !== null && rotation !== undefined && ![0, 90, 180, 270].includes(rotation)) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '旋转角度必须是 0, 90, 180, 270 或 null' } },
-        { status: 400 }
-      )
+    // 验证输入
+    const validation = safeValidate(rotatePhotoSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
+
+    const { rotation } = validation.data
 
     // 验证照片存在且用户有权限访问（排除已删除的照片）
-    const { data: photo, error: photoError } = await supabase
+    // 查询照片（包含相册信息验证）
+    const photoResult = await db
       .from('photos')
-      .select(`
-        id,
-        album_id,
-        deleted_at,
-        albums!inner (
-          id,
-          deleted_at
-        )
-      `)
+      .select('id, album_id, deleted_at')
       .eq('id', id)
-      .is('deleted_at', null) // 排除已删除的照片
+      .is('deleted_at', null)
       .single()
+    
+    // 验证相册存在且未删除
+    if (photoResult.data) {
+      const albumResult = await db
+        .from('albums')
+        .select('id')
+        .eq('id', photoResult.data.album_id)
+        .is('deleted_at', null)
+        .single()
+      
+      if (albumResult.error || !albumResult.data) {
+        return ApiError.notFound('相册不存在或已被删除')
+      }
+    }
 
-    if (photoError || !photo) {
+    if (photoResult.error || !photoResult.data) {
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: '照片不存在或已被删除' } },
         { status: 404 }
       )
     }
+    
+    const photo = photoResult.data
     
     // 双重检查：确保照片未删除
     if (photo.deleted_at) {
@@ -86,33 +110,32 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     // 更新旋转角度
-    const { data: updatedPhoto, error: updateError } = await supabaseAdmin
-      .from('photos')
-      .update({ rotation: rotation === null ? null : rotation })
-      .eq('id', id)
-      .select('id, rotation')
-      .single()
+    const updateResult = await dbAdmin.update('photos', { rotation: rotation === null ? null : rotation }, { id })
 
-    if (updateError) {
-      console.error('Failed to update photo rotation:', updateError)
+    if (updateResult.error) {
+      console.error('Failed to update photo rotation:', updateResult.error)
       return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: '更新失败：' + updateError.message } },
+        { error: { code: 'DB_ERROR', message: '更新失败：' + updateResult.error.message } },
         { status: 500 }
       )
     }
 
+    const updatedPhoto = updateResult.data && updateResult.data.length > 0 ? updateResult.data[0] : null
+
     // 如果照片状态是 completed，需要重新处理图片以应用新的旋转角度
     // 注意：只处理未删除的照片
-    const { data: photoStatus } = await supabaseAdmin
+    const photoStatusResult = await dbAdmin
       .from('photos')
       .select('status, album_id, original_key, deleted_at')
       .eq('id', id)
-      .is('deleted_at', null) // 排除已删除的照片
+      .is('deleted_at', null)
       .single()
+    
+    const photoStatus = photoStatusResult.data
     
     // 如果照片已删除，不触发重新处理
     if (!photoStatus || photoStatus.deleted_at) {
-      return NextResponse.json({
+      return createSuccessResponse({
         success: true,
         data: updatedPhoto,
         message: '旋转角度已保存，但照片已删除，无法重新处理',
@@ -159,10 +182,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
         if (processRes.ok) {
           // Worker 确认收到任务后，才更新状态为 pending
-          await supabaseAdmin
-            .from('photos')
-            .update({ status: 'pending' })
-            .eq('id', id)
+          // Worker 确认收到任务后，才更新状态为 pending
+          await dbAdmin.update('photos', { status: 'pending' }, { id })
           needsReprocessing = true
         } else {
           const errorText = await processRes.text()
@@ -200,27 +221,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     // 如果需要重新处理但失败了，返回错误信息
     if (photoStatus.status === 'completed' && !needsReprocessing && reprocessingError) {
-      return NextResponse.json({
-        success: false,
-        error: {
-          code: 'WORKER_ERROR',
-          message: `旋转角度已保存，但无法触发重新处理：${reprocessingError}。请稍后手动重新生成预览图。`,
-        },
-        data: updatedPhoto,
-      }, { status: 500 })
+      return handleError(
+        new Error(`Worker处理失败: ${reprocessingError}`),
+        `旋转角度已保存，但无法触发重新处理：${reprocessingError}。请稍后手动重新生成预览图。`,
+        500
+      )
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       data: updatedPhoto,
       needsReprocessing,
     })
   } catch (err) {
-    console.error('Photo rotation API error:', err)
-    const errorMessage = err instanceof Error ? err.message : '未知错误'
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误：' + errorMessage } },
-      { status: 500 }
-    )
+    return handleError(err, '更新旋转角度失败')
   }
 }

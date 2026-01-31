@@ -106,7 +106,7 @@ PIS 采用前后端分离的微服务架构，主要包含以下组件：
 - **图片处理**: Sharp
 
 ### 数据库
-- **支持**: Supabase (PostgreSQL), PostgreSQL, MySQL
+- **支持**: PostgreSQL（自托管，推荐）, Supabase（向后兼容）
 - **队列**: Redis
 
 ### 存储
@@ -121,7 +121,7 @@ PIS 采用微服务架构，各组件可以独立部署：
 - **前端**: 部署到任何支持 Next.js 的平台
 - **Worker**: 独立部署，通过 HTTP API 提供服务
 - **存储**: 对象存储服务（MinIO/OSS/COS/S3）
-- **数据库**: PostgreSQL/MySQL（可通过 Supabase）
+- **数据库**: PostgreSQL（自托管，推荐）或 Supabase（向后兼容）
 - **Redis**: 任务队列服务
 
 各组件通过环境变量配置连接，部署方式灵活。
@@ -139,10 +139,20 @@ PIS 采用微服务架构，各组件可以独立部署：
 - `WORKER_API_KEY` 必须与 Worker 配置一致
 
 ```bash
-# 数据库配置
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# 数据库配置（PostgreSQL，推荐）
+DATABASE_TYPE=postgresql
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=your-secure-password
+DATABASE_SSL=false
+
+# 或使用 Supabase（向后兼容）
+# DATABASE_TYPE=supabase
+# NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+# NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+# SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # 存储配置
 NEXT_PUBLIC_MEDIA_URL=https://your-media-domain.com/pis-photos
@@ -158,9 +168,19 @@ NEXT_PUBLIC_APP_URL=https://your-app-domain.com
 ### Worker 环境变量
 
 ```bash
-# 数据库配置
-SUPABASE_URL=https://your-project-id.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# 数据库配置（PostgreSQL，推荐）
+DATABASE_TYPE=postgresql
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=your-secure-password
+DATABASE_SSL=false
+
+# 或使用 Supabase（向后兼容）
+# DATABASE_TYPE=supabase
+# SUPABASE_URL=https://your-project-id.supabase.co
+# SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # 存储配置
 STORAGE_TYPE=minio
@@ -277,7 +297,7 @@ PIS/
 │       └── media.conf              # Nginx 配置示例
 │
 ├── database/
-│   └── full_schema.sql             # 数据库架构
+│   └── init-postgresql-db.sql      # 数据库架构
 │
 ├── scripts/                         # 部署和维护脚本
 │   ├── deploy.sh                   # 部署脚本

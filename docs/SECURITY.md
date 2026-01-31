@@ -99,7 +99,7 @@ STORAGE_ACCESS_KEY="${MINIO_ACCESS_KEY}"  # 从环境变量获取
 **代码位置**:
 - `apps/web/src/app/api/public/albums/[slug]/verify-password/route.ts` - 密码验证
 - `apps/web/src/app/api/public/albums/[slug]/route.ts` - 相册信息（不返回密码）
-- `database/full_schema.sql` - 包含密码字段在内的完整数据库架构
+- `docker/init-postgresql-db.sql` - 包含密码字段在内的完整数据库架构
 
 **使用方式**:
 1. 管理员在相册设置中设置密码

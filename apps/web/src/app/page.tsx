@@ -1,5 +1,5 @@
 import { Camera } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
 import { getTranslations } from 'next-intl/server'
 import { HomeHeader } from '@/components/home/header'
 import { HomeHero } from '@/components/home/home-hero'
@@ -16,10 +16,10 @@ type Photo = Database['public']['Tables']['photos']['Row']
  */
 export default async function HomePage() {
   const t = await getTranslations({ locale: defaultLocale, namespace: 'home' })
-  const supabase = await createClient()
+  const db = await createClient()
 
   // 获取公开相册列表
-  const { data, error: albumsError } = await supabase
+  const albumsResult = await db
     .from('albums')
     .select('*')
     .eq('is_public', true)
@@ -27,11 +27,11 @@ export default async function HomePage() {
     .order('created_at', { ascending: false })
 
   // 如果查询失败，记录错误并返回空数组（优雅降级）
-  if (albumsError) {
-    console.error('Failed to fetch albums:', albumsError)
+  if (albumsResult.error) {
+    console.error('Failed to fetch albums:', albumsResult.error)
   }
 
-  const albums = (data as Album[] | null) || []
+  const albums = (albumsResult.data as Album[] | null) || []
 
   // 获取最新相册作为Hero特色展示
   let featuredAlbum: Album | null = null
@@ -42,37 +42,36 @@ export default async function HomePage() {
     
     // 获取封面照片
     if (featuredAlbum.cover_photo_id) {
-      const { data: cover, error: coverError } = await supabase
+      const coverResult = await db
         .from('photos')
         .select('*')
         .eq('id', featuredAlbum.cover_photo_id)
         .eq('status', 'completed')
-        .is('deleted_at', null) // 排除已删除的照片
-        .maybeSingle() // 使用 maybeSingle() 而不是 single()，避免异常
+        .is('deleted_at', null)
+        .limit(1)
         
-      if (coverError) {
-        console.error('Failed to fetch cover photo:', coverError)
+      if (coverResult.error) {
+        console.error('Failed to fetch cover photo:', coverResult.error)
       } else {
-        coverPhoto = cover as Photo | null
+        coverPhoto = coverResult.data && coverResult.data.length > 0 ? coverResult.data[0] as Photo : null
       }
     }
     
     // 如果没有封面，获取第一张照片
     if (!coverPhoto && featuredAlbum.id) {
-      const { data: firstPhoto, error: firstPhotoError } = await supabase
+      const firstPhotoResult = await db
         .from('photos')
         .select('*')
         .eq('album_id', featuredAlbum.id)
         .eq('status', 'completed')
-        .is('deleted_at', null) // 排除已删除的照片
+        .is('deleted_at', null)
         .order('captured_at', { ascending: false })
         .limit(1)
-        .maybeSingle() // 使用 maybeSingle() 而不是 single()，避免异常
       
-      if (firstPhotoError) {
-        console.error('Failed to fetch first photo:', firstPhotoError)
+      if (firstPhotoResult.error) {
+        console.error('Failed to fetch first photo:', firstPhotoResult.error)
       } else {
-        coverPhoto = firstPhoto as Photo | null
+        coverPhoto = firstPhotoResult.data && firstPhotoResult.data.length > 0 ? firstPhotoResult.data[0] as Photo : null
       }
     }
   }
@@ -91,22 +90,22 @@ export default async function HomePage() {
       .filter((id): id is string => !!id)
     
     // 批量获取封面照片
-    const { data: coverPhotos, error: coverPhotosError } = coverPhotoIds.length > 0
-      ? await supabase
+    const coverPhotosResult = coverPhotoIds.length > 0
+      ? await db
           .from('photos')
           .select('id, thumb_key, preview_key, status')
           .in('id', coverPhotoIds)
           .eq('status', 'completed')
-          .is('deleted_at', null) // 排除已删除的照片
+          .is('deleted_at', null)
       : { data: [], error: null }
     
-    if (coverPhotosError) {
-      console.error('Failed to fetch cover photos:', coverPhotosError)
+    if (coverPhotosResult.error) {
+      console.error('Failed to fetch cover photos:', coverPhotosResult.error)
     }
     
     // 创建封面照片映射
     const coverMap = new Map(
-      (coverPhotos || []).map(photo => [
+      (coverPhotosResult.data || []).map((photo: any) => [
         photo.id,
         { thumb_key: photo.thumb_key, preview_key: photo.preview_key }
       ])
@@ -119,26 +118,26 @@ export default async function HomePage() {
     
     // 批量获取第一张照片（只查询需要的相册）
     const albumIdsNeedingPhoto = albumsNeedingFirstPhoto.map(a => a.id)
-    const { data: firstPhotos, error: firstPhotosError } = albumIdsNeedingPhoto.length > 0
-      ? await supabase
+    const firstPhotosResult = albumIdsNeedingPhoto.length > 0
+      ? await db
           .from('photos')
           .select('album_id, thumb_key, preview_key')
           .in('album_id', albumIdsNeedingPhoto)
           .eq('status', 'completed')
-          .is('deleted_at', null) // 排除已删除的照片
+          .is('deleted_at', null)
           .not('thumb_key', 'is', null)
           .order('captured_at', { ascending: false })
       : { data: [], error: null }
     
-    if (firstPhotosError) {
-      console.error('Failed to fetch first photos:', firstPhotosError)
+    if (firstPhotosResult.error) {
+      console.error('Failed to fetch first photos:', firstPhotosResult.error)
     }
     
     // 为每个相册创建第一张照片映射（每个相册只取第一张）
     const firstPhotoMap = new Map<string, { thumb_key: string | null; preview_key: string | null }>()
-    if (firstPhotos) {
+    if (firstPhotosResult.data) {
       const seenAlbums = new Set<string>()
-      for (const photo of firstPhotos) {
+      for (const photo of firstPhotosResult.data as any[]) {
         if (!seenAlbums.has(photo.album_id)) {
           firstPhotoMap.set(photo.album_id, {
             thumb_key: photo.thumb_key,

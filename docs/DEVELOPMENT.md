@@ -30,8 +30,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/JunyuZhan/pis-cloud.git
-cd pis
+git clone https://github.com/JunyuZhan/pis-standalone.git
+cd pis-standalone
 
 # 2. 安装依赖
 pnpm install
@@ -43,10 +43,11 @@ cd ..
 
 # 4. 配置环境变量（统一使用根目录配置）
 cp .env.example .env
-# 编辑 .env，填入 Supabase 凭据
+# 编辑 .env，填入 PostgreSQL 连接信息
 
 # 5. 初始化数据库
-# 复制 database/full_schema.sql 到 Supabase SQL Editor 执行
+# 在 PostgreSQL 数据库中执行 docker/init-postgresql-db.sql
+psql -U pis -d pis -f docker/init-postgresql-db.sql
 
 # 6. 启动开发服务器
 pnpm dev
@@ -63,11 +64,17 @@ PIS 使用**统一的根目录配置**，`apps/web` 和 `services/worker` 都从
 # PIS 统一环境配置 (根目录)
 # ===========================================
 
-# Supabase 数据库 - 从 Dashboard 获取
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SUPABASE_URL=https://your-project.supabase.co
+# PostgreSQL 数据库配置
+DATABASE_TYPE=postgresql
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=your-password
+DATABASE_SSL=false
+
+# 认证 JWT 密钥
+AUTH_JWT_SECRET=local-dev-secret-key-change-in-production
 
 # MinIO 存储配置
 NEXT_PUBLIC_MEDIA_URL=http://localhost:9000/pis-photos
@@ -126,7 +133,8 @@ pis/
 │       │   │   └── ui/           # 通用 UI 组件
 │       │   ├── hooks/            # 自定义 Hooks
 │       │   ├── lib/              # 工具库
-│       │   │   ├── supabase/     # Supabase 客户端
+│       │   │   ├── database/     # 数据库客户端（PostgreSQL/Supabase）
+│       │   │   ├── supabase/      # Supabase 客户端（向后兼容）
 │       │   │   └── utils.ts      # 通用工具
 │       │   ├── types/            # TypeScript 类型
 │       │   └── middleware.ts     # Next.js 中间件
@@ -142,7 +150,7 @@ pis/
 │           └── lib/              # MinIO/Redis 客户端
 │
 ├── database/
-│   └── full_schema.sql           # 完整数据库架构（一次性执行）
+│   └── init-postgresql-db.sql    # 完整数据库架构（一次性执行）
 │
 ├── docker/
 │   ├── docker-compose.yml        # Docker 编排
@@ -183,10 +191,11 @@ cd services/worker && pnpm dev
 
 | 服务 | 地址 | 说明 |
 |------|------|------|
-| 前端 | http://localhost:3000 | Next.js 开发服务器 |
-| 管理后台 | http://localhost:3000/admin | 需要登录 |
-| MinIO Console | http://localhost:9001 | minioadmin/minioadmin |
-| MinIO API | http://localhost:9000 | 图片存储 |
+| 前端 | http://localhost:3000 | Next.js 开发服务器（开发环境） |
+| 管理后台 | http://localhost:3000/admin | 需要登录（开发环境） |
+| 生产环境 | http://localhost:8080 | Nginx 反向代理（生产环境） |
+| MinIO Console | http://localhost:9001 | minioadmin/minioadmin（仅本地调试） |
+| MinIO API | http://localhost:9000 | 图片存储（仅内部网络） |
 
 ### 常用命令
 
@@ -198,9 +207,10 @@ pnpm lint             # 代码检查
 pnpm format           # 格式化代码
 
 # 数据库
-pnpm db:types         # 生成 Supabase 类型
-# 数据库架构文件: database/full_schema.sql
-# 在 Supabase SQL Editor 中执行即可
+pnpm db:types         # 生成数据库类型（PostgreSQL）
+# 数据库架构文件: docker/init-postgresql-db.sql
+# 在 PostgreSQL 数据库中执行
+psql -U pis -d pis -f docker/init-postgresql-db.sql
 
 # Docker
 cd docker
@@ -238,7 +248,7 @@ bash scripts/run-all-tests.sh     # 运行所有测试
 
 #### 数据库架构
 
-海报功能已包含在 `database/full_schema.sql` 中（`albums.poster_image_url` 字段）。如果使用全新数据库，执行一次 `full_schema.sql` 即可。
+海报功能已包含在 `docker/init-postgresql-db.sql` 中（`albums.poster_image_url` 字段）。如果使用全新数据库，执行一次 `init-postgresql-db.sql` 即可。
 
 #### 使用方法
 
@@ -274,7 +284,7 @@ bash scripts/run-all-tests.sh     # 运行所有测试
 
 #### 数据库架构
 
-模板功能已包含在 `database/full_schema.sql` 中（`album_templates` 表）。如果使用全新数据库，执行一次 `full_schema.sql` 即可。
+模板功能已包含在 `docker/init-postgresql-db.sql` 中（`album_templates` 表）。如果使用全新数据库，执行一次 `init-postgresql-db.sql` 即可。
 
 #### API 端点
 
@@ -381,7 +391,7 @@ bash scripts/run-all-tests.sh     # 运行所有测试
 
 #### 数据库架构
 
-活动元数据功能已包含在 `database/full_schema.sql` 中（`albums.event_date` 和 `albums.location` 字段）。如果使用全新数据库，执行一次 `full_schema.sql` 即可。
+活动元数据功能已包含在 `docker/init-postgresql-db.sql` 中（`albums.event_date` 和 `albums.location` 字段）。如果使用全新数据库，执行一次 `init-postgresql-db.sql` 即可。
 
 #### 新增字段
 
@@ -407,7 +417,7 @@ bash scripts/run-all-tests.sh     # 运行所有测试
 
 #### 代码位置
 
-- 数据库架构：`database/full_schema.sql`（已包含活动元数据字段）
+- 数据库架构：`docker/init-postgresql-db.sql`（已包含活动元数据字段）
 - 类型定义：`apps/web/src/types/database.ts` (albums 表)
 - 创建表单：`apps/web/src/components/admin/create-album-dialog.tsx`
 - 设置表单：`apps/web/src/components/admin/album-settings-form.tsx`
@@ -608,9 +618,9 @@ pnpm dev
 # 日志会直接输出到终端
 ```
 
-### Supabase 调试
+### 数据库调试
 
-1. 打开 Supabase Dashboard
+1. 连接 PostgreSQL 数据库
 2. 进入 **Logs** → **Edge Functions** / **API**
 3. 查看请求和错误日志
 
@@ -652,12 +662,13 @@ curl http://localhost:3000/api/admin/albums
 ### Q: TypeScript 类型错误？
 
 ```bash
-# 重新生成 Supabase 类型
+# 重新生成数据库类型（PostgreSQL）
 pnpm db:types
 
 # 或手动更新
 cd apps/web
-npx supabase gen types typescript --project-id your-project-id > src/types/database.ts
+# PostgreSQL 类型可以从数据库 schema 生成
+# 或使用 pg-to-ts 等工具
 ```
 
 ### Q: Docker 服务启动失败？
@@ -688,13 +699,14 @@ pnpm dev
 
 1. **确认数据库迁移已执行**：
    ```sql
-   -- 在 Supabase Dashboard 中检查表是否存在
+   -- 在 PostgreSQL 数据库中检查表是否存在
+   SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';
    SELECT * FROM album_templates LIMIT 1;
    ```
 
 2. **检查 RLS 策略**：
    - 确保 `album_templates` 表有正确的 RLS 策略
-   - `database/full_schema.sql` 已包含所有表结构和 RLS 策略设置
+   - `docker/init-postgresql-db.sql` 已包含所有表结构
 
 3. **检查 API 权限**：
    - 确保已登录管理员账户
@@ -731,7 +743,7 @@ pnpm dev
 ### 浏览器扩展
 
 - **React Developer Tools** - React 调试
-- **Supabase DevTools** - Supabase 调试 (可选)
+- **pgAdmin** 或 **DBeaver** - PostgreSQL 数据库管理工具
 
 ### 其他工具
 

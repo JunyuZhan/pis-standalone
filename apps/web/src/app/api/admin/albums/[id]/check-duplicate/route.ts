@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClientFromRequest, createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { checkDuplicateSchema, albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -18,83 +21,52 @@ interface RouteParams {
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    let albumId: string
-    try {
-      const paramsResult = await params
-      albumId = paramsResult.id
-    } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_PARAMS', message: 'Invalid request parameters' } },
-        { status: 400 }
-      )
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
     }
-
-    const response = new NextResponse()
-    const supabase = createClientFromRequest(request, response)
+    
+    const albumId = idValidation.data.id
 
     // Verify authentication
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: 'Please login first' } },
-        { 
-          status: 401,
-          headers: response.headers,
-        }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
+    const db = await createClient()
+
     // Verify album exists
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id')
       .eq('id', albumId)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'ALBUM_NOT_FOUND', message: 'Album not found' } },
-        { 
-          status: 404,
-          headers: response.headers,
-        }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
-    // Parse request body
-    interface CheckDuplicateRequestBody {
-      filename: string
-      fileSize: number
-      fileHash?: string
-    }
-
-    let body: CheckDuplicateRequestBody
+    // Parse and validate request body
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: 'Invalid request body format' } },
-        { 
-          status: 400,
-          headers: response.headers,
-        }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误')
     }
 
-    const { filename, fileSize, fileHash } = body
-
-    if (!filename || fileSize === undefined) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: 'Missing required parameters' } },
-        { 
-          status: 400,
-          headers: response.headers,
-        }
-      )
+    const bodyValidation = safeValidate(checkDuplicateSchema, body)
+    if (!bodyValidation.success) {
+      return handleError(bodyValidation.error, '输入验证失败')
     }
 
-    const adminClient = createAdminClient()
+    const { filename, fileSize, fileHash } = bodyValidation.data
+
+    const adminClient = await createAdminClient()
 
     // Check for duplicates: prefer file hash if provided, otherwise use filename + file size
     let duplicatePhoto = null
@@ -105,7 +77,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       // For now, use filename + size detection
       // TODO: Enable this detection after adding hash field to database
       /*
-      const { data: hashMatch } = await adminClient
+      const hashMatchResult = await adminClient
         .from('photos')
         .select('id, filename')
         .eq('album_id', albumId)
@@ -114,15 +86,15 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         .limit(1)
         .single()
       
-      if (hashMatch) {
-        duplicatePhoto = hashMatch
+      if (hashMatchResult.data) {
+        duplicatePhoto = hashMatchResult.data
       }
       */
     }
 
     // If not found by hash, use filename + file size detection
     if (!duplicatePhoto) {
-      const { data: sizeMatch, error: sizeError } = await adminClient
+      const sizeMatchResult = await adminClient
         .from('photos')
         .select('id, filename, file_size')
         .eq('album_id', albumId)
@@ -130,38 +102,18 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         .eq('file_size', fileSize)
         .is('deleted_at', null)
         .limit(1)
-        .maybeSingle()
 
-      // maybeSingle() returns null instead of throwing error when no record found
-      if (!sizeError && sizeMatch) {
-        duplicatePhoto = sizeMatch
+      // Check if any record found
+      if (sizeMatchResult.data && sizeMatchResult.data.length > 0) {
+        duplicatePhoto = sizeMatchResult.data[0]
       }
     }
 
-    return NextResponse.json(
-      {
-        isDuplicate: !!duplicatePhoto,
-        duplicatePhoto: duplicatePhoto || null,
-      },
-      {
-        headers: response.headers,
-      }
-    )
+    return NextResponse.json({
+      isDuplicate: !!duplicatePhoto,
+      duplicatePhoto: duplicatePhoto || null,
+    })
   } catch (error) {
-    console.error('[Check Duplicate API] Error:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
-    
-    return NextResponse.json(
-      { 
-        error: { 
-          code: 'INTERNAL_ERROR', 
-          message: errorMessage
-        } 
-      },
-      { 
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    )
+    return handleError(error, '检查重复文件失败')
   }
 }

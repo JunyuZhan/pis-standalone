@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { templateIdSchema, updateTemplateSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -15,160 +18,124 @@ interface RouteParams {
 // GET /api/admin/templates/[id] - 获取模板详情
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(templateIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的模板ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    const { data, error } = await supabase
+    const result = await db
       .from('album_templates')
       .select('*')
       .eq('id', id)
       .single()
 
-    if (error || !data) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '模板不存在' } },
-        { status: 404 }
-      )
+    if (result.error || !result.data) {
+      return ApiError.notFound('模板不存在')
     }
 
-    return NextResponse.json(data)
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return createSuccessResponse(result.data)
+  } catch (error) {
+    return handleError(error, '获取模板详情失败')
   }
 }
 
 // PATCH /api/admin/templates/[id] - 更新模板
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(templateIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的模板ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface UpdateTemplateRequestBody {
-      name?: string
-      description?: string | null
-      is_public?: boolean
-      layout?: 'masonry' | 'grid' | 'carousel'
-      sort_rule?: 'capture_desc' | 'capture_asc' | 'manual'
-      allow_download?: boolean
-      allow_batch_download?: boolean
-      show_exif?: boolean
-      password?: string | null
-      expires_at?: string | null
-      watermark_enabled?: boolean
-      watermark_type?: 'text' | 'logo' | null
-      watermark_config?: Record<string, unknown> | null
-    }
-    let body: UpdateTemplateRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
-    
-    const updateData: Record<string, string | boolean | number | Record<string, unknown> | null> = {}
+
+    // 验证输入（使用 partial schema）
+    const validation = safeValidate(updateTemplateSchema.partial(), body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
+    const updateData: Record<string, unknown> = {}
+    const { name, description, settings } = validation.data
 
     // 只更新提供的字段
-    if (body.name !== undefined) updateData.name = body.name.trim()
-    if (body.description !== undefined) updateData.description = body.description?.trim() || null
-    if (body.is_public !== undefined) updateData.is_public = body.is_public
-    if (body.layout !== undefined) updateData.layout = body.layout
-    if (body.sort_rule !== undefined) updateData.sort_rule = body.sort_rule
-    if (body.allow_download !== undefined) updateData.allow_download = body.allow_download
-    if (body.allow_batch_download !== undefined) updateData.allow_batch_download = body.allow_batch_download
-    if (body.show_exif !== undefined) updateData.show_exif = body.show_exif
-    if (body.password !== undefined) updateData.password = body.password || null
-    if (body.expires_at !== undefined) updateData.expires_at = body.expires_at || null
-    if (body.watermark_enabled !== undefined) updateData.watermark_enabled = body.watermark_enabled
-    if (body.watermark_type !== undefined) updateData.watermark_type = body.watermark_type || null
-    if (body.watermark_config !== undefined) updateData.watermark_config = body.watermark_config || {}
-
-    const { data, error } = await supabase
-      .from('album_templates')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: error.message } },
-        { status: 500 }
-      )
+    if (name !== undefined) updateData.name = name.trim()
+    if (description !== undefined) updateData.description = description?.trim() || null
+    if (settings !== undefined) {
+      // 将 settings 中的字段合并到 updateData
+      Object.assign(updateData, settings)
     }
 
-    return NextResponse.json(data)
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    const updateResult = await db.update('album_templates', updateData, { id })
+
+    if (updateResult.error) {
+      return handleError(updateResult.error, '更新模板失败')
+    }
+
+    return createSuccessResponse(updateResult.data && updateResult.data.length > 0 ? updateResult.data[0] : null)
+  } catch (error) {
+    return handleError(error, '更新模板失败')
   }
 }
 
 // DELETE /api/admin/templates/[id] - 删除模板
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(templateIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的模板ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    const { error } = await supabase
-      .from('album_templates')
-      .delete()
-      .eq('id', id)
+    const deleteResult = await db.delete('album_templates', { id })
 
-    if (error) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: error.message } },
-        { status: 500 }
-      )
+    if (deleteResult.error) {
+      return handleError(deleteResult.error, '删除模板失败')
     }
 
-    return NextResponse.json({ success: true, message: '模板已删除' })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return createSuccessResponse({ success: true, message: '模板已删除' })
+  } catch (error) {
+    return handleError(error, '删除模板失败')
   }
 }

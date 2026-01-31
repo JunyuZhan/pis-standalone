@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import { purgePhotoCache } from '@/lib/cloudflare-purge'
+import { albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -38,20 +41,23 @@ interface PhotoRow {
 // GET /api/admin/albums/[id]/photos - 获取照片列表
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id } = idValidation.data
     const { searchParams } = new URL(request.url)
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 分页参数
@@ -65,35 +71,36 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const showDeleted = searchParams.get('showDeleted') === 'true' // 是否显示已删除的照片
 
     // 验证相册存在
-    const { data: albumData, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, title')
       .eq('id', id)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !albumData) {
+    if (albumResult.error || !albumResult.data) {
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: '相册不存在' } },
         { status: 404 }
       )
     }
 
-    const album = albumData as { id: string; title: string }
+    const album = albumResult.data as { id: string; title: string }
 
     // 构建照片查询
-    let query = supabase
+    let query = db
       .from('photos')
-      .select('*', { count: 'exact' })
+      .select('*')
       .eq('album_id', id)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+      .limit(limit)
+      .offset(offset)
     
     // 根据 showDeleted 参数决定是否过滤已删除的照片
     if (showDeleted) {
       // 显示已删除的照片
-      query = query.not('deleted_at', 'is', null)
+      query = query.neq('deleted_at', null)
       // 按删除时间倒序排列
       query = query.order('deleted_at', { ascending: false })
     } else {
@@ -113,30 +120,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       query = query.eq('is_selected', false)
     }
 
-    const { data, error: photosError, count } = await query
+    const result = await query
 
-    if (photosError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: photosError.message } },
-        { status: 500 }
-      )
+    if (result.error) {
+      return handleError(result.error, '查询照片列表失败')
     }
 
-    const photos = data as PhotoRow[] | null
+    const photos = result.data as PhotoRow[] | null
+    const count = result.count || result.data?.length || 0
 
     // 获取选中统计（排除已删除的照片）
-    const { count: selectedCount } = await supabase
+    const selectedCountResult = await db
       .from('photos')
-      .select('*', { count: 'exact', head: true })
+      .select('*')
       .eq('album_id', id)
       .eq('is_selected', true)
       .eq('status', 'completed')
       .is('deleted_at', null)
+    
+    const selectedCount = selectedCountResult.count || selectedCountResult.data?.length || 0
 
     // 构造响应（添加 URL）
     const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL
 
-    return NextResponse.json({
+    return createSuccessResponse({
       album: {
         id: album.id,
         title: album.title,
@@ -175,11 +182,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         totalPages: Math.ceil((count || 0) / limit),
       },
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '获取照片列表失败')
   }
 }
 
@@ -187,12 +191,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
       return NextResponse.json(
@@ -233,36 +235,38 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       )
     }
 
-    const { data: albumData, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, slug, cover_photo_id')
       .eq('id', id)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !albumData) {
+    if (albumResult.error || !albumResult.data) {
       return NextResponse.json(
         { error: { code: 'NOT_FOUND', message: '相册不存在' } },
         { status: 404 }
       )
     }
 
+    const albumData = albumResult.data
+
     // 验证照片属于该相册，并获取文件路径信息（只查询未删除的照片）
-    const { data: photosData, error: checkError } = await supabase
+    const photosResult = await db
       .from('photos')
       .select('id, original_key, thumb_key, preview_key')
       .eq('album_id', id)
       .is('deleted_at', null) // 只查询未删除的照片
       .in('id', photoIds)
 
-    if (checkError) {
+    if (photosResult.error) {
       return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: checkError.message } },
+        { error: { code: 'DB_ERROR', message: photosResult.error.message } },
         { status: 500 }
       )
     }
 
-    const validPhotos = photosData as Array<{ id: string; original_key: string; thumb_key: string | null; preview_key: string | null }> | null
+    const validPhotos = photosResult.data as Array<{ id: string; original_key: string; thumb_key: string | null; preview_key: string | null }> | null
     const validPhotoIds = validPhotos?.map((p) => p.id) || []
 
     if (validPhotoIds.length === 0) {
@@ -276,13 +280,17 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     // MinIO 文件保留 30 天，由 Worker 定时任务自动清理
     // 同时更新 updated_at，使图片 URL 的查询参数变化（作为 CDN 缓存清除的备用方案）
     const now = new Date().toISOString()
-    const { error: deleteError } = await supabase
-      .from('photos')
-      .update({ 
+    
+    // 批量更新：为每张照片设置 deleted_at
+    const updatePromises = validPhotoIds.map(photoId =>
+      db.update('photos', { 
         deleted_at: now,
         updated_at: now, // 更新 updated_at，使图片 URL 变化
-      })
-      .in('id', validPhotoIds)
+      }, { id: photoId })
+    )
+    
+    const updateResults = await Promise.all(updatePromises)
+    const deleteError = updateResults.find(r => r.error)?.error
 
     if (deleteError) {
       return NextResponse.json(
@@ -334,25 +342,20 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     if (albumData.cover_photo_id && validPhotoIds.includes(albumData.cover_photo_id)) {
-      await supabase
-        .from('albums')
-        .update({ cover_photo_id: null })
-        .eq('id', id)
+      await db.update('albums', { cover_photo_id: null }, { id })
     }
 
     // 更新相册的照片计数（重新统计 completed 状态且未删除的照片）
     const deletedCount = validPhotoIds.length
-    const { count: actualPhotoCount } = await supabase
+    const photoCountResult = await db
       .from('photos')
-      .select('*', { count: 'exact', head: true })
+      .select('*')
       .eq('album_id', id)
       .eq('status', 'completed')
       .is('deleted_at', null) // 只统计未删除的照片
     
-    await supabase
-      .from('albums')
-      .update({ photo_count: actualPhotoCount ?? 0 })
-      .eq('id', id)
+    const actualPhotoCount = photoCountResult.count || photoCountResult.data?.length || 0
+    await db.update('albums', { photo_count: actualPhotoCount }, { id })
 
     // 3. 清除 Worker 相册缓存（如果配置了 Worker URL）
     const workerUrl = process.env.WORKER_URL || process.env.WORKER_API_URL
@@ -412,10 +415,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       deletedCount: deletedCount,
       message: `已删除 ${deletedCount} 张照片（已移至回收站，MinIO 文件将保留 30 天后自动清理）`,
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '获取照片列表失败')
   }
 }

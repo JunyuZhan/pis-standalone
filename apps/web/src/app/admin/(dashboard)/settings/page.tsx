@@ -1,46 +1,53 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import { User, Mail, Database, Server, Globe, Lock, HardDrive, Calendar, FileText } from 'lucide-react'
 import { ChangePasswordForm } from '@/components/admin/change-password-form'
 import { TemplateManager } from '@/components/admin/template-manager'
 
 export default async function SettingsPage() {
-  const supabase = await createClient()
+  const db = await createClient()
   
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   if (!user) {
     redirect('/admin/login')
   }
 
   // 获取相册统计
-  const { count: albumCount } = await supabase
+  const albumCountResult = await db
     .from('albums')
-    .select('*', { count: 'exact', head: true })
+    .select('*')
     .is('deleted_at', null)
 
-  const { count: photoCount } = await supabase
+  const albumCount = albumCountResult.count || albumCountResult.data?.length || 0
+
+  const photoCountResult = await db
     .from('photos')
-    .select('*', { count: 'exact', head: true })
+    .select('*')
     .eq('status', 'completed')
-    .is('deleted_at', null) // 排除已删除的照片
+    .is('deleted_at', null)
+
+  const photoCount = photoCountResult.count || photoCountResult.data?.length || 0
 
   // 获取公开相册数量
-  const { count: publicAlbumCount } = await supabase
+  const publicAlbumCountResult = await db
     .from('albums')
-    .select('*', { count: 'exact', head: true })
+    .select('*')
     .eq('is_public', true)
     .is('deleted_at', null)
 
+  const publicAlbumCount = publicAlbumCountResult.count || publicAlbumCountResult.data?.length || 0
+
   // 获取最近创建的相册
-  const { data: recentAlbums } = await supabase
+  const recentAlbumsResult = await db
     .from('albums')
     .select('created_at')
     .is('deleted_at', null)
     .order('created_at', { ascending: false })
     .limit(1)
+
+  const recentAlbums = recentAlbumsResult.data || []
 
   return (
     <div className="space-y-6">
@@ -142,7 +149,7 @@ export default async function SettingsPage() {
           </div>
           <div className="flex justify-between items-center py-2 border-b border-border/50">
             <span className="text-text-muted">数据库</span>
-            <span className="font-medium">Supabase</span>
+            <span className="font-medium">PostgreSQL</span>
           </div>
           <div className="flex justify-between items-center py-2 border-b border-border/50">
             <span className="text-text-muted">存储服务</span>

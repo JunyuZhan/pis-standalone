@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import { getAlbumShareUrl } from '@/lib/utils'
 import type { AlbumInsert, Database } from '@/types/database'
+import { albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 type Album = Database['public']['Tables']['albums']['Row']
 
@@ -18,38 +21,38 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const { id } = idValidation.data
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 获取原相册信息
-    const { data: originalAlbum, error: albumError } = await supabase
+    const originalAlbumResult = await db
       .from('albums')
       .select('*')
       .eq('id', id)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !originalAlbum) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (originalAlbumResult.error || !originalAlbumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
     // 构建新相册数据（复制所有配置，但不复制照片）
-    const album = originalAlbum as Album
+    const album = originalAlbumResult.data as Album
     const newAlbumData: AlbumInsert = {
       title: `${album.title} (副本)`,
       description: album.description,
@@ -76,17 +79,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     }
 
     // 创建新相册
-    const { data: newAlbum, error: createError } = await supabase
-      .from('albums')
-      .insert(newAlbumData)
-      .select()
-      .single()
+    const insertResult = await db.insert('albums', newAlbumData)
 
-    if (createError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: createError.message } },
-        { status: 500 }
-      )
+    if (insertResult.error) {
+      return ApiError.internal(`数据库错误: ${insertResult.error.message}`)
+    }
+
+    const newAlbum = insertResult.data && insertResult.data.length > 0 ? insertResult.data[0] : null
+
+    if (!newAlbum) {
+      return ApiError.internal('创建相册失败')
     }
 
     // 生成分享URL（添加错误处理）
@@ -107,11 +109,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       shareUrl,
       message: '相册已复制',
     })
-  } catch {
-    console.error('Duplicate album error')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '复制相册失败')
   }
 }

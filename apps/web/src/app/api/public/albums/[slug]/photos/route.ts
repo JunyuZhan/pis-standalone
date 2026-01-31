@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { albumSlugSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ slug: string }>
@@ -26,50 +28,49 @@ interface PhotoRow {
 // GET /api/public/albums/[slug]/photos - 获取照片列表
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { slug } = await params
+    const paramsData = await params
+    
+    // 验证路径参数
+    const slugValidation = safeValidate(albumSlugSchema, paramsData)
+    if (!slugValidation.success) {
+      return handleError(slugValidation.error, '无效的相册标识')
+    }
+    
+    const { slug } = slugValidation.data
     const { searchParams } = new URL(request.url)
     
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '20')
     const groupId = searchParams.get('group')
 
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 先获取相册 ID（检查密码和过期时间）
-    const { data: albumData, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, sort_rule, password, expires_at, is_public, allow_share')
       .eq('slug', slug)
       .single()
 
-    if (albumError || !albumData) {
-      return NextResponse.json(
-        { error: { code: 'ALBUM_NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
+    const album = albumResult.data
+
     // 检查相册是否允许分享
-    if (albumData.allow_share === false) {
-      return NextResponse.json(
-        { error: { code: 'ALBUM_NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (album.allow_share === false) {
+      return ApiError.notFound('相册不存在')
     }
 
     // 检查相册是否过期
-    if (albumData.expires_at && new Date(albumData.expires_at) < new Date()) {
-      return NextResponse.json(
-        { error: { code: 'EXPIRED', message: '相册已过期' } },
-        { status: 403 }
-      )
+    if (album.expires_at && new Date(album.expires_at) < new Date()) {
+      return ApiError.forbidden('相册已过期')
     }
 
     // 检查是否需要密码（如果设置了密码且未验证，返回需要密码）
     // 注意：这里不验证密码，密码验证应该在页面层或单独的 API 中处理
     // 如果相册是私有的且设置了密码，需要先验证密码才能访问照片
-
-    const album = albumData as { id: string; sort_rule: string | null }
     
     // 确定排序规则：优先使用URL参数，否则使用相册的sort_rule，最后使用默认值
     const sort = searchParams.get('sort') || album.sort_rule || 'capture_desc'
@@ -77,16 +78,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // 如果指定了分组，先获取分组中的照片ID
     let photoIds: string[] | null = null
     if (groupId) {
-      const { data: assignments } = await supabase
+      const assignmentsResult = await db
         .from('photo_group_assignments')
         .select('photo_id')
         .eq('group_id', groupId)
 
-      if (assignments && assignments.length > 0) {
-        photoIds = assignments.map((a) => a.photo_id)
+      interface PhotoGroupAssignment {
+        photo_id: string
+      }
+      if (assignmentsResult.data && assignmentsResult.data.length > 0) {
+        photoIds = (assignmentsResult.data as PhotoGroupAssignment[]).map((a) => a.photo_id)
       } else {
         // 如果分组中没有照片，直接返回空结果
-        return NextResponse.json({
+        return createSuccessResponse({
           photos: [],
           pagination: {
             page: 1,
@@ -103,9 +107,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // 根据排序参数构建不同的查询
     // 优化：只查询前端需要的字段，减少数据传输
-    let query = supabase
+    let query = db
       .from('photos')
-      .select('id, thumb_key, preview_key, original_key, filename, width, height, exif, blur_data, captured_at, is_selected, rotation, updated_at', { count: 'exact' })
+      .select('id, thumb_key, preview_key, original_key, filename, width, height, exif, blur_data, captured_at, is_selected, rotation, updated_at')
       .eq('album_id', album.id)
       .eq('status', 'completed')
       .is('deleted_at', null) // 排除已删除的照片
@@ -133,20 +137,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         query = query.order('captured_at', { ascending: false })
     }
 
-    const { data, error: photosError, count } = await query.range(offset, offset + limit - 1)
+    query = query.limit(limit).offset(offset)
+    const result = await query
 
-    if (photosError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: photosError.message } },
-        { status: 500 }
-      )
+    if (result.error) {
+      return handleError(result.error, '查询照片列表失败')
     }
 
-    const photos = data as PhotoRow[] | null
+    const photos = result.data as PhotoRow[] | null
+    const count = result.count || result.data?.length || 0
 
     // 添加缓存头：公开相册缓存5分钟，私有相册不缓存
     // 优化：添加 ETag 支持，减少重复传输
-    const cacheHeaders: Record<string, string> = albumData.is_public
+    const cacheHeaders: Record<string, string> = album.is_public
       ? {
           'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
           Vary: 'Accept-Encoding',
@@ -186,10 +189,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       },
       { headers: cacheHeaders }
     )
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '获取照片列表失败')
   }
 }

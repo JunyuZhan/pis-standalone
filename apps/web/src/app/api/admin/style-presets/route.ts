@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 预设定义（与 worker 中的定义保持一致）
@@ -125,44 +126,39 @@ function getAllPresets(): StylePreset[] {
  * 获取风格预设列表 API
  * 
  * @route GET /api/admin/style-presets
+ * @description 获取照片风格预设列表，用于照片调色
  * 
- * @queryParams
- * - category?: 'portrait' | 'landscape' | 'general' - 可选，按分类筛选
+ * @auth 需要管理员登录
  * 
- * @returns
- * - 200: 成功返回预设列表
- *   {
- *     "presets": [
- *       {
- *         "id": "japanese-fresh",
- *         "name": "日系小清新",
- *         "category": "portrait",
- *         "description": "温暖柔和的光线，温柔清新的氛围",
- *         "cssFilter": "brightness(1.05) contrast(0.9) saturate(0.9) hue-rotate(10deg)"
- *       },
- *       ...
- *     ]
- *   }
- * - 401: 未授权
- * - 500: 服务器错误
+ * @query {string} [category] - 分类筛选（可选：portrait/landscape/general）
  * 
- * @security
- * - 需要用户认证（Supabase Auth）
+ * @returns {Object} 200 - 成功返回预设列表
+ * @returns {Object[]} 200.data.presets - 预设数组
+ * @returns {string} 200.data.presets[].id - 预设ID
+ * @returns {string} 200.data.presets[].name - 预设名称
+ * @returns {string} 200.data.presets[].category - 预设分类（portrait/landscape/general）
+ * @returns {string} 200.data.presets[].description - 预设描述
+ * @returns {string} [200.data.presets[].cssFilter] - CSS滤镜字符串（可选）
+ * 
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @example
+ * ```typescript
+ * // 获取所有预设
+ * const response = await fetch('/api/admin/style-presets')
+ * 
+ * // 获取人物风格预设
+ * const response = await fetch('/api/admin/style-presets?category=portrait')
+ * ```
  */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
-
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 获取查询参数（可选分类筛选）
@@ -186,21 +182,10 @@ export async function GET(request: NextRequest) {
       cssFilter: preset.cssFilter,
     }))
 
-    return NextResponse.json({
+    return createSuccessResponse({
       presets: presetList,
     })
   } catch (error) {
-    console.error('[Style Presets API] Error:', error)
-    const errorMessage = error instanceof Error ? error.message : 'Internal server error'
-
-    return NextResponse.json(
-      {
-        error: {
-          code: 'INTERNAL_ERROR',
-          message: errorMessage,
-        },
-      },
-      { status: 500 }
-    )
+    return handleError(error, '获取风格预设列表失败')
   }
 }

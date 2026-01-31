@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import type { User } from '@supabase/supabase-js'
+
+/**
+ * 用户类型定义
+ */
+interface AuthUser {
+  id: string
+  email: string
+}
 
 /**
  * 认证状态 Hook
@@ -11,31 +17,44 @@ import type { User } from '@supabase/supabase-js'
  */
 export function useAuth() {
   const router = useRouter()
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const supabase = createClient()
-
     // 获取当前用户
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user)
-      setLoading(false)
-    })
+    fetch('/api/auth/me')
+      .then((res) => res.json())
+      .then((data) => {
+        setUser(data.user)
+        setLoading(false)
+      })
+      .catch(() => {
+        setUser(null)
+        setLoading(false)
+      })
 
-    // 监听认证状态变化
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
+    // 定期检查认证状态（每5分钟）
+    const interval = setInterval(() => {
+      fetch('/api/auth/me')
+        .then((res) => res.json())
+        .then((data) => {
+          setUser(data.user)
+        })
+        .catch(() => {
+          setUser(null)
+        })
+    }, 5 * 60 * 1000)
 
-    return () => subscription.unsubscribe()
+    return () => clearInterval(interval)
   }, [])
 
   const signOut = async () => {
-    const supabase = createClient()
-    await supabase.auth.signOut()
+    try {
+      await fetch('/api/auth/signout', { method: 'POST' })
+    } catch (error) {
+      console.error('Sign out error:', error)
+    }
+    setUser(null)
     router.push('/admin/login')
     router.refresh()
   }

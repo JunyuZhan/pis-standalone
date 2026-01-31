@@ -86,17 +86,16 @@ check_dependencies() {
 configure_env() {
     step "配置环境变量"
     
-    echo "请准备好以下信息 (从 Supabase Dashboard 获取):"
+    echo "请准备好以下信息:"
     echo ""
-    echo "  1. Project URL (例: https://xxxxx.supabase.co)"
-    echo "  2. anon public key"
-    echo "  3. service_role key (保密!)"
+    echo "  1. PostgreSQL 数据库连接信息"
+    echo "  2. MinIO 存储配置（或使用默认值）"
     echo ""
     read -p "准备好了吗? [y/N]: " ready
     
     if [[ ! "$ready" =~ ^[Yy]$ ]]; then
-        warn "请先获取 Supabase 凭据后再运行此脚本"
-        echo "获取方式: Supabase Dashboard → Settings → API"
+        warn "请先准备好数据库连接信息后再运行此脚本"
+        echo "参考: docs/ENVIRONMENT_VARIABLES.md"
         return 1
     fi
     
@@ -118,9 +117,12 @@ validate_env_vars() {
     
     # 检查必需的环境变量
     local required_vars=(
-        "NEXT_PUBLIC_SUPABASE_URL"
-        "NEXT_PUBLIC_SUPABASE_ANON_KEY"
-        "SUPABASE_SERVICE_ROLE_KEY"
+        "DATABASE_TYPE"
+        "DATABASE_HOST"
+        "DATABASE_NAME"
+        "DATABASE_USER"
+        "DATABASE_PASSWORD"
+        "AUTH_JWT_SECRET"
         "STORAGE_TYPE"
         "STORAGE_ENDPOINT"
         "STORAGE_ACCESS_KEY"
@@ -140,19 +142,19 @@ validate_env_vars() {
     # 检查数据库类型
     if grep -q "^DATABASE_TYPE=" "$env_file"; then
         local db_type=$(grep "^DATABASE_TYPE=" "$env_file" | cut -d'=' -f2 | tr -d '"' | tr -d "'")
-        success "数据库类型: ${db_type:-supabase}"
-    else
-        warn "未设置 DATABASE_TYPE，将使用默认值 supabase"
-    fi
-    
-    # 检查 Supabase URL 格式（仅当使用 Supabase 时）
-    if grep -q "^DATABASE_TYPE=supabase" "$env_file" || ! grep -q "^DATABASE_TYPE=" "$env_file"; then
-        if grep -q "NEXT_PUBLIC_SUPABASE_URL=.*supabase\.co" "$env_file"; then
-            success "Supabase URL 格式正确"
-        else
-            error "Supabase URL 格式不正确"
-            errors=$((errors + 1))
+        success "数据库类型: ${db_type:-postgresql}"
+        
+        # 检查 PostgreSQL 配置
+        if [ "$db_type" = "postgresql" ]; then
+            if grep -q "^DATABASE_HOST=" "$env_file" && grep -q "^DATABASE_NAME=" "$env_file" && grep -q "^DATABASE_USER=" "$env_file" && grep -q "^DATABASE_PASSWORD=" "$env_file"; then
+                success "PostgreSQL 配置完整"
+            else
+                error "PostgreSQL 配置不完整（需要 DATABASE_HOST, DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD）"
+                errors=$((errors + 1))
+            fi
         fi
+    else
+        warn "未设置 DATABASE_TYPE，将使用默认值 postgresql"
     fi
     
     # 检查是否使用了示例密钥
@@ -172,14 +174,42 @@ validate_env_vars() {
     fi
     
     echo ""
-    read -p "Supabase Project URL: " SUPABASE_URL
-    read -p "Supabase Anon Key: " SUPABASE_ANON_KEY
-    read -p "Supabase Service Role Key: " SUPABASE_SERVICE_KEY
+    echo "配置 PostgreSQL 数据库连接..."
+    read -p "PostgreSQL Host [localhost]: " DATABASE_HOST
+    DATABASE_HOST=${DATABASE_HOST:-localhost}
+    
+    read -p "PostgreSQL Port [5432]: " DATABASE_PORT
+    DATABASE_PORT=${DATABASE_PORT:-5432}
+    
+    read -p "PostgreSQL Database Name [pis]: " DATABASE_NAME
+    DATABASE_NAME=${DATABASE_NAME:-pis}
+    
+    read -p "PostgreSQL Username [pis]: " DATABASE_USER
+    DATABASE_USER=${DATABASE_USER:-pis}
+    
+    read -sp "PostgreSQL Password: " DATABASE_PASSWORD
+    echo ""
     
     # 验证输入
-    if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" || -z "$SUPABASE_SERVICE_KEY" ]]; then
-        error "所有字段都是必填的"
+    if [[ -z "$DATABASE_HOST" || -z "$DATABASE_NAME" || -z "$DATABASE_USER" || -z "$DATABASE_PASSWORD" ]]; then
+        error "数据库配置不完整"
         return 1
+    fi
+    
+    # 生成 JWT Secret
+    echo ""
+    echo "生成 JWT Secret..."
+    if command -v openssl &> /dev/null; then
+        AUTH_JWT_SECRET=$(openssl rand -hex 32)
+    elif command -v node &> /dev/null; then
+        AUTH_JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+    else
+        read -sp "JWT Secret (至少 32 字符): " AUTH_JWT_SECRET
+        echo ""
+        if [[ ${#AUTH_JWT_SECRET} -lt 32 ]]; then
+            error "JWT Secret 至少需要 32 个字符"
+            return 1
+        fi
     fi
     
     # 创建统一的根目录环境变量文件
@@ -190,13 +220,18 @@ validate_env_vars() {
 # ===========================================
 
 # ==================== 数据库配置 ====================
-DATABASE_TYPE=supabase
+DATABASE_TYPE=postgresql
 
-# ==================== Supabase 数据库 ====================
-NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
-SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY
-SUPABASE_URL=$SUPABASE_URL
+# ==================== PostgreSQL 数据库 ====================
+DATABASE_HOST=$DATABASE_HOST
+DATABASE_PORT=$DATABASE_PORT
+DATABASE_NAME=$DATABASE_NAME
+DATABASE_USER=$DATABASE_USER
+DATABASE_PASSWORD=$DATABASE_PASSWORD
+DATABASE_SSL=false
+
+# ==================== 认证配置 ====================
+AUTH_JWT_SECRET=$AUTH_JWT_SECRET
 
 # ==================== MinIO 存储配置 ====================
 NEXT_PUBLIC_MEDIA_URL=http://localhost:19000/pis-photos
@@ -279,7 +314,7 @@ setup_local() {
     echo "  3. 管理后台: ${CYAN}http://localhost:3000/admin/login${NC}"
     echo "  4. MinIO 控制台: ${CYAN}http://localhost:19001${NC} (用户名/密码: minioadmin/minioadmin)"
     echo ""
-    echo "提示: 首次使用需要在 Supabase 创建管理员账号"
+    echo "提示: 首次使用需要创建管理员账号: ${CYAN}pnpm create-admin${NC}"
 }
 
 # 生产环境部署
@@ -290,26 +325,41 @@ setup_production() {
     echo ""
     echo "  1. 主站域名 (例: photos.example.com)"
     echo "  2. 媒体域名 (例: media.example.com)"
-    echo "  3. Supabase 凭据"
+    echo "  3. PostgreSQL 数据库连接信息"
     echo ""
     
     read -p "主站域名: " APP_DOMAIN
     read -p "媒体域名: " MEDIA_DOMAIN
-    read -p "Supabase URL: " SUPABASE_URL
-    read -p "Supabase Service Role Key: " SUPABASE_SERVICE_KEY
     
-    # 生成随机密码
+    # PostgreSQL 配置
+    read -p "PostgreSQL 主机: " DB_HOST
+    read -p "PostgreSQL 端口 [5432]: " DB_PORT
+    DB_PORT=${DB_PORT:-5432}
+    read -p "PostgreSQL 数据库名: " DB_NAME
+    read -p "PostgreSQL 用户名: " DB_USER
+    read -sp "PostgreSQL 密码: " DB_PASSWORD
+    echo ""
+    
+    # 生成随机密钥
     MINIO_ACCESS=$(openssl rand -hex 8)
     MINIO_SECRET=$(openssl rand -hex 16)
+    JWT_SECRET=$(openssl rand -hex 32)
     
     # 创建生产环境配置
     cat > .env << EOF
 # ==================== 数据库配置 ====================
-DATABASE_TYPE=supabase
+DATABASE_TYPE=postgresql
 
-# ==================== Supabase 数据库 ====================
-SUPABASE_URL=$SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY
+# ==================== PostgreSQL 数据库 ====================
+DATABASE_HOST=$DB_HOST
+DATABASE_PORT=$DB_PORT
+DATABASE_NAME=$DB_NAME
+DATABASE_USER=$DB_USER
+DATABASE_PASSWORD=$DB_PASSWORD
+DATABASE_SSL=true
+
+# ==================== 认证配置 ====================
+AUTH_JWT_SECRET=$JWT_SECRET
 
 # ==================== MinIO 存储配置 ====================
 # MinIO (使用随机生成的强密码)
@@ -334,9 +384,20 @@ EOF
     # 显示 Vercel 环境变量
     echo "Vercel 环境变量配置:"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL"
-    echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=<从 Supabase 获取>"
-    echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY"
+    echo "# PostgreSQL 配置（推荐）"
+    echo "DATABASE_TYPE=postgresql"
+    echo "DATABASE_HOST=your-postgres-host"
+    echo "DATABASE_PORT=5432"
+    echo "DATABASE_NAME=pis"
+    echo "DATABASE_USER=pis"
+    echo "DATABASE_PASSWORD=your-secure-password"
+    echo "AUTH_JWT_SECRET=your-jwt-secret-key"
+    echo ""
+    echo "# Supabase 配置（向后兼容）"
+    echo "# DATABASE_TYPE=supabase"
+    echo "# NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL"
+    echo "# NEXT_PUBLIC_SUPABASE_ANON_KEY=<从 Supabase 获取>"
+    echo "# SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY"
     echo "NEXT_PUBLIC_APP_URL=https://$APP_DOMAIN"
     echo "NEXT_PUBLIC_MEDIA_URL=https://$MEDIA_DOMAIN/pis-photos"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -411,13 +472,22 @@ run_migrations() {
     step "数据库架构初始化"
     
     echo "⚠️  重要提示："
-    echo "  - 数据库架构文件: docker/init-supabase-db.sql"
-    echo "  - 仅适用于全新的 Supabase 数据库（首次安装）"
+    echo "  - 数据库架构文件: docker/init-postgresql-db.sql"
+    echo "  - 适用于 PostgreSQL 数据库（推荐）"
+    echo "  - Supabase 用户请使用: docker/init-supabase-db.sql"
     echo "  - 只需执行一次即可完成所有数据库初始化"
     echo "  - 不要在已有数据的数据库上重复执行"
     echo ""
     
-    echo "📋 Supabase 执行步骤:"
+    echo "📋 PostgreSQL 执行步骤（推荐，自动初始化）:"
+    echo "  - Docker Compose 会在首次启动时自动初始化数据库"
+    echo "  - 如果使用 docker-compose.standalone.yml，无需手动操作"
+    echo ""
+    echo "  手动初始化（外部数据库或已有数据卷）:"
+    echo "  1. 连接到数据库: psql -U pis -d pis"
+    echo "  2. 执行初始化脚本: \\i docker/init-postgresql-db.sql"
+    echo ""
+    echo "📋 Supabase 执行步骤（向后兼容，混合部署模式）:"
     echo "  1. 打开 Supabase Dashboard -> SQL Editor"
     echo "  2. 复制 docker/init-supabase-db.sql 的全部内容"
     echo "  3. 粘贴并点击 Run 执行"
@@ -468,10 +538,15 @@ check_status() {
     # 检查数据库架构文件
     echo ""
     echo "数据库架构文件:"
-    if [[ -f "database/full_schema.sql" ]]; then
-        success "database/full_schema.sql 存在（一次性执行即可）"
+    if [[ -f "docker/init-postgresql-db.sql" ]]; then
+        success "docker/init-postgresql-db.sql 存在"
+        echo "  - Docker Compose 会自动初始化（首次启动时）"
+        echo "  - 或手动执行: psql -U pis -d pis -f docker/init-postgresql-db.sql"
     else
-        warn "database/full_schema.sql 不存在"
+        warn "docker/init-postgresql-db.sql 不存在"
+    fi
+    if [[ -f "docker/init-supabase-db.sql" ]]; then
+        success "docker/init-supabase-db.sql 存在（向后兼容，混合部署模式）"
     fi
 }
 

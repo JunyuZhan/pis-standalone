@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClientFromRequest } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -11,18 +13,21 @@ interface RouteParams {
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id: albumId } = await params
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const albumId = idValidation.data.id
     
     // 验证登录状态
-    const response = NextResponse.next({ request })
-    const supabase = createClientFromRequest(request, response)
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
     
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
     
     // 使用代理路由调用 Worker API
@@ -48,20 +53,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     
     if (!workerRes.ok) {
       const errorText = await workerRes.text()
-      return NextResponse.json(
-        { error: { code: 'WORKER_ERROR', message: 'Worker 服务错误', details: errorText } },
-        { status: workerRes.status }
-      )
+      return ApiError.internal(`Worker 服务错误: ${errorText}`)
     }
     
     const result = await workerRes.json()
     return NextResponse.json(result)
   } catch (error) {
-    console.error('Check pending error:', error)
-    const errorMessage = error instanceof Error ? error.message : '服务器错误'
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: errorMessage } },
-      { status: 500 }
-    )
+    return handleError(error, '检查待处理照片失败')
   }
 }

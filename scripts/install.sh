@@ -167,8 +167,8 @@ clone_repo() {
     echo -e "${CYAN}正在克隆代码...${NC}"
     
     # 尝试使用 GitHub 代理（国内用户）
-    local repo_url="https://github.com/JunyuZhan/pis-cloud.git"
-    local proxy_url="https://ghproxy.com/https://github.com/JunyuZhan/pis-cloud.git"
+    local repo_url="https://github.com/JunyuZhan/pis-standalone.git"
+    local proxy_url="https://ghproxy.com/https://github.com/JunyuZhan/pis-standalone.git"
     
     # 先尝试直接克隆
     if git clone --depth 1 "$repo_url" "$INSTALL_DIR" 2>/dev/null; then

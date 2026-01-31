@@ -1,51 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/database'
+import { albumSlugSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ slug: string }>
 }
 
 /**
- * GET /api/public/albums/[slug]/download-selected
- * 获取所有已选照片的下载链接
+ * 批量下载已选照片 API
+ * 
+ * @route GET /api/public/albums/[slug]/download-selected
+ * @description 获取所有已选照片的下载链接列表，用于批量下载
+ * 
+ * @auth 无需认证（公开接口，但需要相册允许批量下载）
+ * 
+ * @param {string} slug - 相册标识（URL友好格式）
+ * 
+ * @returns {Object} 200 - 成功返回下载链接列表
+ * @returns {Object[]} 200.data.downloads - 下载链接数组
+ * @returns {string} 200.data.downloads[].photoId - 照片ID
+ * @returns {string} 200.data.downloads[].downloadUrl - 临时下载链接
+ * @returns {string} 200.data.downloads[].filename - 文件名
+ * @returns {number} 200.data.totalCount - 已选照片总数
+ * 
+ * @returns {Object} 403 - 禁止访问（相册不允许下载或不允许批量下载）
+ * @returns {Object} 404 - 相册不存在
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @note 仅返回已选中的照片（is_selected=true）的下载链接
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
   try {
-    const { slug } = await params
-    const supabase = createAdminClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const slugValidation = safeValidate(albumSlugSchema, paramsData)
+    if (!slugValidation.success) {
+      return handleError(slugValidation.error, '无效的相册标识')
+    }
+    
+    const { slug } = slugValidation.data
+    const db = await createAdminClient()
 
     // 1. 获取相册信息
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, title, allow_download, allow_batch_download')
       .eq('slug', slug)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
+
+    const album = albumResult.data
 
     // 2. 检查是否允许下载
     if (!album.allow_download) {
-      return NextResponse.json(
-        { error: { code: 'FORBIDDEN', message: '此相册不允许下载' } },
-        { status: 403 }
-      )
+      return ApiError.forbidden('此相册不允许下载')
     }
 
     if (!album.allow_batch_download) {
-      return NextResponse.json(
-        { error: { code: 'FORBIDDEN', message: '此相册不允许批量下载' } },
-        { status: 403 }
-      )
+      return ApiError.forbidden('此相册不允许批量下载')
     }
 
     // 3. 获取所有已选照片
-    const { data: photos, error: photosError } = await supabase
+    const photosResult = await db
       .from('photos')
       .select('id, filename, original_key')
       .eq('album_id', album.id)
@@ -53,15 +75,14 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       .eq('status', 'completed')
       .order('sort_order', { ascending: true })
 
-    if (photosError) {
-      throw photosError
+    if (photosResult.error) {
+      throw photosResult.error
     }
 
+    const photos = photosResult.data || []
+
     if (!photos || photos.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'NO_SELECTION', message: '没有已选照片' } },
-        { status: 400 }
-      )
+      return ApiError.badRequest('没有已选照片')
     }
 
     // 4. 通过 Worker API 生成 presigned URL
@@ -69,11 +90,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const workerApiKey = process.env.WORKER_API_KEY
     
     if (!workerApiKey) {
-      console.error('[Batch Download API] WORKER_API_KEY not configured')
-      return NextResponse.json(
-        { error: { code: 'CONFIG_ERROR', message: '服务器配置错误' } },
-        { status: 500 }
-      )
+      return handleError(new Error('WORKER_API_KEY not configured'), '服务器配置错误')
     }
 
     // 为每张照片生成 presigned URL
@@ -117,23 +134,16 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const validLinks = downloadLinks.filter((link): link is NonNullable<typeof link> => link !== null)
 
     if (validLinks.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'GENERATION_ERROR', message: '无法生成下载链接' } },
-        { status: 500 }
-      )
+      return handleError(new Error('无法生成下载链接'), '无法生成下载链接')
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       albumTitle: album.title,
       count: validLinks.length,
       photos: validLinks,
     })
 
   } catch (error) {
-    console.error('Download selected error:', error)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return handleError(error, '获取下载链接失败')
   }
 }

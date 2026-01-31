@@ -162,8 +162,8 @@ class CustomAuthClient {
 }
 
 // ==================== 兼容客户端工厂 ====================
-// Note: These functions are kept for backward compatibility but are not used in Supabase-only mode
-// PIS now uses Supabase directly, so these compatibility functions are deprecated
+// Note: These functions are kept for backward compatibility but are not used in PostgreSQL mode
+// PIS now uses PostgreSQL by default, so these compatibility functions are deprecated
 
 /**
  * 创建兼容的 Auth 客户端（服务端）
@@ -180,7 +180,7 @@ export function createCompatAuthClient() {
 
 /**
  * 从请求创建兼容的 Auth 客户端
- * @deprecated Not used - PIS now uses Supabase directly
+ * @deprecated Not used - PIS now uses PostgreSQL by default
  */
 export function createCompatAuthClientFromRequest(_request: NextRequest, _response?: NextResponse) {
   return {
@@ -195,7 +195,7 @@ export function createCompatAuthClientFromRequest(_request: NextRequest, _respon
 
 /**
  * 自定义认证 Middleware（替代 Supabase middleware）
- * Note: This is kept for backward compatibility but is not used in Supabase-only mode
+ * Note: This is kept for backward compatibility but is not used in PostgreSQL mode
  */
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
   const response = NextResponse.next({ request })

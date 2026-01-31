@@ -125,21 +125,44 @@ check_docker() {
     fi
 }
 
-# 配置部署模式（固定为 Vercel + Supabase）
+# 配置部署模式
 configure_deployment_mode() {
     print_step "2/9" "部署架构配置"
 
     echo ""
-    echo -e "${BOLD}部署架构：Vercel + Supabase + 自建 Worker${NC}"
+    echo -e "${BOLD}请选择部署架构：${NC}"
     echo ""
-    echo "  - 前端: Vercel（自动部署）"
-    echo "  - 数据库: Supabase Cloud"
-    echo "  - 存储/Worker: 你的服务器"
+    echo "  1) 完全自托管（推荐）"
+    echo "     - 前端: 自托管（Docker + Nginx）"
+    echo "     - 数据库: PostgreSQL（自托管）"
+    echo "     - 存储/Worker: 你的服务器"
+    echo ""
+    echo "  2) 混合部署（向后兼容）"
+    echo "     - 前端: Vercel（自动部署）"
+    echo "     - 数据库: Supabase Cloud"
+    echo "     - 存储/Worker: 你的服务器"
     echo ""
     
-    DEPLOYMENT_MODE="hybrid"
-    AUTH_MODE="supabase"
-    print_success "架构: Vercel + Supabase"
+    read -p "$(echo -e ${GREEN}请选择 [1/2，默认: 1]${NC}): " mode_choice
+    mode_choice=${mode_choice:-1}
+    
+    case "$mode_choice" in
+        1)
+            DEPLOYMENT_MODE="standalone"
+            AUTH_MODE="custom"
+            print_success "架构: 完全自托管（PostgreSQL）"
+            ;;
+        2)
+            DEPLOYMENT_MODE="hybrid"
+            AUTH_MODE="supabase"
+            print_success "架构: 混合部署（Supabase）"
+            ;;
+        *)
+            print_error "无效选择，使用默认：完全自托管"
+            DEPLOYMENT_MODE="standalone"
+            AUTH_MODE="custom"
+            ;;
+    esac
 }
 
 # 获取域名配置
@@ -206,7 +229,44 @@ configure_supabase() {
     get_confirm "已创建管理员账号，继续" "y"
 }
 
-# PostgreSQL 配置已移除 - PIS 现在只使用 Supabase
+# 配置 PostgreSQL（完全自托管模式）
+configure_postgresql() {
+    print_step "4a/9" "配置 PostgreSQL 数据库"
+
+    echo ""
+    echo -e "${CYAN}PostgreSQL 数据库配置${NC}"
+    echo ""
+
+    DATABASE_HOST=$(get_input "数据库主机" "localhost")
+    DATABASE_PORT=$(get_input "数据库端口" "5432")
+    DATABASE_NAME=$(get_input "数据库名称" "pis")
+    DATABASE_USER=$(get_input "数据库用户" "pis")
+    DATABASE_PASSWORD=$(get_input "数据库密码" "")
+    
+    if [ -z "$DATABASE_PASSWORD" ]; then
+        DATABASE_PASSWORD=$(generate_secret | cut -c1-32)
+        print_success "已生成数据库密码"
+    fi
+
+    # 生成 JWT Secret
+    AUTH_JWT_SECRET=$(generate_secret)
+    print_success "已生成 JWT Secret"
+
+    print_success "PostgreSQL 已配置"
+    
+    echo ""
+    echo -e "${CYAN}数据库初始化说明:${NC}"
+    echo "  - Docker Compose 会自动初始化数据库（首次启动时）"
+    echo "  - 如果使用外部数据库，需要手动执行初始化脚本"
+    echo ""
+    
+    # 检查是否使用 Docker 内的数据库
+    if [ "$DEPLOYMENT_MODE" = "standalone" ]; then
+        echo -e "${GREEN}✓ 使用 Docker 内数据库，将自动初始化${NC}"
+    else
+        get_confirm "数据库已初始化，继续" "y"
+    fi
+}
 
 # 配置 MinIO
 configure_minio() {
@@ -318,7 +378,9 @@ configure_alerts() {
     ALERT_ENABLED="true"
 }
 
-# 管理员账号创建已移除 - PIS 使用 Supabase 认证，管理员在 Supabase Dashboard 中创建
+# 管理员账号创建
+# - 完全自托管模式: 使用 pnpm create-admin 创建
+# - 混合部署模式: 在 Supabase Dashboard 中创建
 
 # 生成配置文件
 generate_config() {
@@ -329,8 +391,37 @@ generate_config() {
     echo ""
     echo -e "${CYAN}正在生成配置文件...${NC}"
 
-    # Vercel + Supabase 架构配置
-    cat > "$env_file" << EOF
+    # 根据部署模式生成配置
+    if [ "$DEPLOYMENT_MODE" = "standalone" ]; then
+        # 完全自托管配置
+        cat > "$env_file" << EOF
+# ============================================
+# PIS 配置文件 (完全自托管)
+# 自动生成于: $(date)
+# ============================================
+
+# ==================== 域名配置 ====================
+DOMAIN=$DOMAIN
+NEXT_PUBLIC_APP_URL=$APP_URL
+NEXT_PUBLIC_MEDIA_URL=$MEDIA_URL
+NEXT_PUBLIC_WORKER_URL=$WORKER_URL
+
+# ==================== 数据库配置 ====================
+DATABASE_TYPE=postgresql
+DATABASE_HOST=$DATABASE_HOST
+DATABASE_PORT=$DATABASE_PORT
+DATABASE_NAME=$DATABASE_NAME
+DATABASE_USER=$DATABASE_USER
+DATABASE_PASSWORD=$DATABASE_PASSWORD
+DATABASE_SSL=false
+
+# ==================== 认证配置 ====================
+AUTH_MODE=custom
+AUTH_JWT_SECRET=$AUTH_JWT_SECRET
+EOF
+    else
+        # 混合部署配置（Supabase）
+        cat > "$env_file" << EOF
 # ============================================
 # PIS 配置文件 (Vercel + Supabase + 自建 Worker)
 # 自动生成于: $(date)
@@ -342,11 +433,19 @@ NEXT_PUBLIC_APP_URL=$APP_URL
 NEXT_PUBLIC_MEDIA_URL=$MEDIA_URL
 NEXT_PUBLIC_WORKER_URL=$WORKER_URL
 
+# ==================== 数据库配置 ====================
+DATABASE_TYPE=supabase
+
 # ==================== Supabase 配置 ====================
 NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY
 SUPABASE_URL=$SUPABASE_URL
+EOF
+    fi
+    
+    # 公共配置
+    cat >> "$env_file" << EOF
 
 # ==================== MinIO 配置 ====================
 MINIO_ACCESS_KEY=$MINIO_ACCESS_KEY
@@ -397,29 +496,59 @@ EOF
         echo "  $ cd docker"
         echo "  $ docker-compose up -d"
         echo ""
-        echo -e "${GREEN}2. Vercel 前端部署${NC}"
-        echo ""
-        echo "  a. 访问 https://vercel.com 导入你的 GitHub 仓库"
-        echo "  b. 配置构建:"
-        echo "     - Root Directory: apps/web"
-        echo "     - Build Command: pnpm build"
-        echo "  c. 添加环境变量（在 Vercel Dashboard）:"
-        echo "     - NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL"
-        echo "     - NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY"
-        echo "     - SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY"
-        echo "     - NEXT_PUBLIC_APP_URL=$APP_URL"
-        echo "     - NEXT_PUBLIC_MEDIA_URL=$MEDIA_URL"
-        echo "     - WORKER_API_KEY=$WORKER_API_KEY"
-        echo "     - ALBUM_SESSION_SECRET=$ALBUM_SESSION_SECRET"
-        echo "  d. 点击 Deploy"
-        echo ""
-        echo -e "${GREEN}3. 绑定域名${NC}"
-        echo ""
-        echo "在 Vercel 中添加你的域名，按提示配置 DNS。"
-        echo ""
-        echo -e "${YELLOW}⚠️  重要: 记得将 worker.$DOMAIN 的 A 记录指向你的服务器 IP${NC}"
-        echo "   media.$DOMAIN 的 A 记录也指向你的服务器 IP"
-        echo ""
+        if [ "$DEPLOYMENT_MODE" = "standalone" ]; then
+            echo -e "${GREEN}2. 启动所有服务${NC}"
+            echo ""
+            echo "启动完全自托管服务:"
+            echo "  $ cd docker"
+            echo "  $ docker-compose -f docker-compose.standalone.yml up -d"
+            echo ""
+            echo -e "${GREEN}3. 数据库初始化${NC}"
+            echo ""
+            echo "  📌 重要说明："
+            echo "     - Docker Compose 会在首次启动时自动初始化数据库"
+            echo "     - 如果使用外部数据库，需要手动执行初始化脚本"
+            echo ""
+            echo "  a. 自动初始化（推荐，Docker 内数据库）:"
+            echo "     - 数据库会在容器首次启动时自动初始化"
+            echo "     - 无需手动操作"
+            echo ""
+            echo "  b. 手动初始化（外部数据库）:"
+            echo "     $ psql -U $DATABASE_USER -d $DATABASE_NAME -f docker/init-postgresql-db.sql"
+            echo ""
+            echo "  c. 创建管理员账号（数据库初始化后）:"
+            echo "     $ pnpm create-admin"
+            echo ""
+            echo -e "${GREEN}4. 配置 Nginx 和 SSL${NC}"
+            echo ""
+            echo "参考 docker/nginx/ 目录下的配置文件配置 Nginx 反向代理和 SSL。"
+            echo ""
+        else
+            echo -e "${GREEN}2. Vercel 前端部署${NC}"
+            echo ""
+            echo "  a. 访问 https://vercel.com 导入你的 GitHub 仓库"
+            echo "  b. 配置构建:"
+            echo "     - Root Directory: apps/web"
+            echo "     - Build Command: pnpm build"
+            echo "  c. 添加环境变量（在 Vercel Dashboard）:"
+            echo "     - DATABASE_TYPE=supabase"
+            echo "     - NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL"
+            echo "     - NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY"
+            echo "     - SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_KEY"
+            echo "     - NEXT_PUBLIC_APP_URL=$APP_URL"
+            echo "     - NEXT_PUBLIC_MEDIA_URL=$MEDIA_URL"
+            echo "     - WORKER_API_KEY=$WORKER_API_KEY"
+            echo "     - ALBUM_SESSION_SECRET=$ALBUM_SESSION_SECRET"
+            echo "  d. 点击 Deploy"
+            echo ""
+            echo -e "${GREEN}3. 绑定域名${NC}"
+            echo ""
+            echo "在 Vercel 中添加你的域名，按提示配置 DNS。"
+            echo ""
+            echo -e "${YELLOW}⚠️  重要: 记得将 worker.$DOMAIN 的 A 记录指向你的服务器 IP${NC}"
+            echo "   media.$DOMAIN 的 A 记录也指向你的服务器 IP"
+            echo ""
+        fi
         echo -e "${CYAN}========================================${NC}"
 
     # 保存重要信息
@@ -428,7 +557,7 @@ EOF
 # 生成时间: $(date)
 # ⚠️  警告: 此文件包含敏感信息，请妥善保管，不要泄露或提交到 Git
 
-部署架构: Vercel + Supabase + 自建 Worker
+部署架构: $([ "$DEPLOYMENT_MODE" = "standalone" ] && echo "完全自托管（PostgreSQL）" || echo "Vercel + Supabase + 自建 Worker")
 域名: $DOMAIN
 
 # 重要密钥（请妥善保管）
@@ -437,10 +566,22 @@ Worker API Key: $WORKER_API_KEY
 MinIO 访问密钥: $MINIO_ACCESS_KEY
 MinIO 密钥: $MINIO_SECRET_KEY
 
-# Supabase 配置
+# 数据库配置
+$([ "$DEPLOYMENT_MODE" = "standalone" ] && cat << EOF
+数据库类型: PostgreSQL
+数据库主机: $DATABASE_HOST
+数据库端口: $DATABASE_PORT
+数据库名称: $DATABASE_NAME
+数据库用户: $DATABASE_USER
+JWT Secret: $AUTH_JWT_SECRET
+EOF
+|| cat << EOF
+数据库类型: Supabase
 Supabase URL: $SUPABASE_URL
 Supabase Anon Key: $SUPABASE_ANON_KEY
 Supabase Service Key: $SUPABASE_SERVICE_KEY
+EOF
+)
 EOF
 
     print_success "部署信息已保存到 .deployment-info"
@@ -470,6 +611,52 @@ show_completion_info() {
     echo -e "${CYAN}如需重新配置，请运行: bash docker/deploy.sh${NC}"
 }
 
+# 检查并初始化数据库（仅 Docker 内数据库）
+check_and_init_database() {
+    if [ "$DEPLOYMENT_MODE" != "standalone" ]; then
+        return 0
+    fi
+    
+    # 检查是否使用 Docker 内的数据库
+    if [ "$DATABASE_HOST" = "localhost" ] || [ "$DATABASE_HOST" = "127.0.0.1" ] || [ "$DATABASE_HOST" = "postgres" ]; then
+        print_step "10/10" "检查数据库初始化状态"
+        
+        echo ""
+        echo -e "${CYAN}检查数据库是否已初始化...${NC}"
+        
+        # 等待 PostgreSQL 容器启动
+        if docker ps | grep -q "pis-postgres"; then
+            echo "等待数据库就绪..."
+            sleep 5
+            
+            # 检查数据库是否已初始化（检查是否存在 users 表）
+            if docker exec pis-postgres psql -U "$DATABASE_USER" -d "$DATABASE_NAME" -tAc "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users');" | grep -q "t"; then
+                print_success "数据库已初始化"
+            else
+                print_warning "数据库未初始化，将在容器启动时自动初始化"
+                echo ""
+                echo -e "${YELLOW}注意：${NC}"
+                echo "  - PostgreSQL 容器会在首次启动时自动执行初始化脚本"
+                echo "  - 如果数据卷已存在，需要手动执行初始化脚本"
+                echo ""
+                
+                if get_confirm "是否现在手动初始化数据库？" "n"; then
+                    echo ""
+                    echo "执行初始化脚本..."
+                    if docker exec -i pis-postgres psql -U "$DATABASE_USER" -d "$DATABASE_NAME" < "$SCRIPT_DIR/init-postgresql-db.sql" 2>/dev/null; then
+                        print_success "数据库初始化完成"
+                    else
+                        print_error "数据库初始化失败，请手动执行:"
+                        echo "  docker exec -i pis-postgres psql -U $DATABASE_USER -d $DATABASE_NAME < docker/init-postgresql-db.sql"
+                    fi
+                fi
+            fi
+        else
+            print_warning "PostgreSQL 容器未运行，将在启动时自动初始化"
+        fi
+    fi
+}
+
 # 主函数
 main() {
     # 显示欢迎信息
@@ -494,12 +681,20 @@ main() {
     check_docker
     configure_deployment_mode
     configure_domain
-    configure_supabase
+    if [ "$DEPLOYMENT_MODE" = "standalone" ]; then
+        configure_postgresql
+    else
+        configure_supabase
+    fi
     configure_minio
     configure_worker
     configure_security
     configure_alerts
     generate_config
+    
+    # 检查并初始化数据库
+    check_and_init_database
+    
     show_completion_info
 }
 

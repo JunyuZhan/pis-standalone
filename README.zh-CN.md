@@ -3,17 +3,17 @@
 > Private Instant photo Sharing - 专为摄影师打造的私有化照片交付工具
 
 <p align="center">
-  <a href="https://github.com/JunyuZhan/pis-cloud/stargazers">
-    <img src="https://img.shields.io/github/stars/JunyuZhan/pis-cloud?style=social" alt="GitHub stars" />
+  <a href="https://github.com/JunyuZhan/pis-standalone/stargazers">
+    <img src="https://img.shields.io/github/stars/JunyuZhan/pis-standalone?style=social" alt="GitHub stars" />
   </a>
 </p>
 
 <p align="center">
-  <a href="https://star-history.com/#JunyuZhan/pis-cloud&Date">
+  <a href="https://star-history.com/#JunyuZhan/pis-standalone&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JunyuZhan/pis-cloud&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JunyuZhan/pis-cloud&type=Date" />
-      <img src="https://api.star-history.com/svg?repos=JunyuZhan/pis-cloud&type=Date" alt="Star History Chart" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=JunyuZhan/pis-standalone&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=JunyuZhan/pis-standalone&type=Date" />
+      <img src="https://api.star-history.com/svg?repos=JunyuZhan/pis-standalone&type=Date" alt="Star History Chart" />
     </picture>
   </a>
 </p>
@@ -78,13 +78,13 @@
 - 密码保护和过期时间
 - 相册模板和访问统计
 
-### 💰 **灵活部署**
-- **架构**: Vercel（前端）+ Supabase（数据库和认证）+ 自建服务器（存储和 Worker）
-- **存储**: MinIO、阿里云 OSS、腾讯云 COS、AWS S3
-- **数据库**: Supabase 云端
-- **认证**: Supabase Auth
-- **CDN**: Cloudflare、阿里云、腾讯云
-- 配置简单，生产就绪
+### 💰 **完全自托管部署**
+- **架构**: 所有服务容器化（PostgreSQL + MinIO + Redis + Web + Worker + Nginx）
+- **存储**: MinIO（自托管）
+- **数据库**: PostgreSQL（自托管）
+- **认证**: 自定义认证（用户名/密码）
+- **Web 服务器**: Nginx 反向代理，支持 SSL
+- 完全数据隐私，无外部依赖
 
 ---
 
@@ -92,20 +92,22 @@
 
 ### 部署架构
 
-**Vercel + Supabase + 自建 Worker**
+**完全自托管部署**
 
-- **前端**: 部署到 Vercel（自动）
-- **数据库**: Supabase 云端（有免费额度）
-- **Worker 和存储**: 自建服务器
+- **前端**: 自托管（Docker + Nginx）
+- **数据库**: PostgreSQL（自托管）
+- **存储**: MinIO（自托管）
+- **Worker**: 自托管（Docker）
+- **认证**: 自定义认证（用户名/密码）
 
 ### 一键部署
 
 ```bash
 # 一键安装（复制粘贴到终端执行）
-curl -sSL https://raw.githubusercontent.com/JunyuZhan/PIS/main/scripts/install.sh | tr -d '\r' | bash
+curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/install.sh | tr -d '\r' | bash
 
 # 国内用户（使用代理加速）
-curl -sSL https://ghproxy.com/https://raw.githubusercontent.com/JunyuZhan/PIS/main/scripts/install.sh | tr -d '\r' | bash
+curl -sSL https://ghproxy.com/https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/install.sh | tr -d '\r' | bash
 ```
 
 > 💡 **提示**: `tr -d '\r'` 命令可确保跨系统兼容性，移除 Windows 行尾。脚本本身也包含自动行尾清理机制作为备用方案。
@@ -113,17 +115,17 @@ curl -sSL https://ghproxy.com/https://raw.githubusercontent.com/JunyuZhan/PIS/ma
 或者手动安装：
 
 ```bash
-git clone https://github.com/JunyuZhan/pis-cloud.git
-cd pis/docker
+git clone https://github.com/JunyuZhan/pis-standalone.git
+cd pis-standalone/docker
 bash deploy.sh
 ```
 
 引导程序会完成：
-- ✅ 选择部署模式（三选一：混合/半自托管/完全自托管）
+- ✅ 配置 PostgreSQL 数据库
 - ✅ 自动生成安全密钥
-- ✅ 配置存储（MinIO/OSS/COS/S3）
-- ✅ 启动所有服务
-- ✅ 自动创建管理员账号（完全自托管模式）
+- ✅ 配置存储（MinIO）
+- ✅ 启动所有服务（PostgreSQL + MinIO + Redis + Web + Worker + Nginx）
+- ✅ 自动创建管理员账号
 
 > 📖 **详细指南**: [部署文档](docs/i18n/zh-CN/DEPLOYMENT.md)
 
@@ -144,23 +146,17 @@ pnpm dev
 <details>
 <summary>点击展开手动部署步骤</summary>
 
-#### 1. 配置 Supabase
+#### 1. 配置 PostgreSQL 数据库
 
-1. 创建 [Supabase](https://supabase.com) 项目
+1. 启动 PostgreSQL 服务（通过 Docker Compose）
 2. **执行数据库架构**：
-   - 进入 Supabase Dashboard → **SQL Editor**
-   - 执行数据库迁移（参见部署文档）
+   - 连接到 PostgreSQL 数据库
+   - 执行数据库迁移脚本（参见部署文档）
    - ✅ 完成！
 3. **创建管理员账号**：
-   - 进入 Supabase Dashboard → **Authentication** → **Users**
-   - 点击 **Add user** → **Create new user**
-   - 填写信息：
-     - **Email**: 你的管理员邮箱（例如：`admin@example.com`）
-     - **Password**: 设置一个强密码
-     - ✅ **Auto Confirm User**（勾选此项）
-   - 点击 **Create user**
+   - 通过部署脚本自动创建
+   - 或手动在数据库中创建用户
    - ✅ 此账号将用于登录 `/admin/login` 管理后台
-4. 在 **Settings** → **API** 复制 API Keys
 
 #### 2. 配置环境变量
 
@@ -177,13 +173,10 @@ cp .env.example .env
 **示例 `.env` 文件**:
 ```bash
 # 数据库配置
-DATABASE_TYPE=supabase
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-SUPABASE_URL=https://your-project.supabase.co
+DATABASE_TYPE=postgresql
+DATABASE_URL=postgresql://user:password@localhost:5432/pis
 
-# 存储配置（默认使用 MinIO）
+# 存储配置（MinIO）
 STORAGE_TYPE=minio
 NEXT_PUBLIC_MEDIA_URL=http://localhost:9000/pis-photos
 STORAGE_ENDPOINT=localhost
@@ -205,8 +198,6 @@ REDIS_PORT=6379
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-> 💡 **使用云存储？** 查看 [部署指南](docs/i18n/zh-CN/DEPLOYMENT.md) 了解如何配置阿里云 OSS、腾讯云 COS 或 AWS S3
-
 #### 3. 启动服务
 
 ```bash
@@ -223,11 +214,13 @@ pnpm dev
 
 | 地址 | 说明 |
 |------|------|
-| http://localhost:3000 | 首页 |
-| http://localhost:3000/admin/login | 管理后台（使用在 Supabase 中创建的管理员账号登录） |
-| http://localhost:9001 | MinIO 控制台（用户名：`minioadmin`，密码：`minioadmin`） |
+| http://localhost:8080 | 首页 |
+| http://localhost:8080/admin/login | 管理后台（使用部署脚本创建的管理员账号登录） |
+| http://localhost:9001 | MinIO 控制台（用户名：`minioadmin`，密码：`minioadmin`，仅本地调试） |
 
-> 💡 **首次登录**：使用你在 Supabase **Authentication** → **Users** 中创建的邮箱和密码登录管理后台。
+> **注意**：生产环境使用 8080 端口，配合 frpc/ddnsto 内网穿透访问。详见 [部署指南](docs/i18n/zh-CN/DEPLOYMENT.md)。
+
+> 💡 **首次登录**：使用部署脚本创建的管理员账号登录管理后台。
 
 ---
 
@@ -239,18 +232,18 @@ pnpm dev
 
 ```bash
 # 克隆项目
-git clone https://github.com/JunyuZhan/pis-cloud.git
-cd pis
+git clone https://github.com/JunyuZhan/pis-standalone.git
+cd pis-standalone
 
 # 运行引导式部署（交互式）
 bash docker/deploy.sh
 ```
 
 脚本会引导你完成：
-- ✅ 配置 Supabase（数据库和认证）
+- ✅ 配置 PostgreSQL 数据库
 - ✅ 自动生成安全密钥（API 密钥、密码）
-- ✅ 配置存储（MinIO/OSS/COS/S3）
-- ✅ 启动 Worker 和存储服务
+- ✅ 配置存储（MinIO）
+- ✅ 启动所有服务（PostgreSQL + MinIO + Redis + Web + Worker + Nginx）
 
 **远程服务器部署：**
 
@@ -264,10 +257,10 @@ bash docker/deploy.sh <服务器IP> <SSH用户>
 
 ### 选项 2：手动部署
 
-1. **配置数据库** - 创建 Supabase 项目
-2. **配置存储** - 设置 MinIO 或云存储（OSS/COS/S3）
-3. **部署前端** - 部署到 Vercel
-4. **部署 Worker** - 在服务器上运行 Docker Compose
+1. **配置数据库** - 设置 PostgreSQL
+2. **配置存储** - 设置 MinIO
+3. **配置 Nginx** - 设置反向代理和 SSL
+4. **启动服务** - 使用 Docker Compose 启动所有服务
 
 > 📖 **详细部署指南**: [docs/i18n/zh-CN/DEPLOYMENT.md](docs/i18n/zh-CN/DEPLOYMENT.md)
 
@@ -277,8 +270,10 @@ bash docker/deploy.sh <服务器IP> <SSH用户>
 
 ## 🏗️ 系统架构
 
-**前端** (Next.js on Vercel) → **Worker** (BullMQ + Sharp) → **存储** (MinIO/OSS/COS/S3)  
-**数据库** (Supabase 云端) + **队列** (Redis) + **CDN** (可选)
+**所有服务容器化：**
+
+**Web** (Next.js) → **Nginx** (反向代理) → **Worker** (BullMQ + Sharp) → **存储** (MinIO)  
+**数据库** (PostgreSQL) + **队列** (Redis) + **全部自托管**
 
 ---
 
@@ -296,12 +291,13 @@ pnpm lint       # 运行代码检查
 
 ## 📁 环境变量
 
-关键变量: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STORAGE_TYPE`, `STORAGE_ENDPOINT`, `NEXT_PUBLIC_APP_URL`, `WORKER_API_KEY`, `ALBUM_SESSION_SECRET`
+关键变量: `DATABASE_URL`, `STORAGE_TYPE`, `STORAGE_ENDPOINT`, `NEXT_PUBLIC_APP_URL`, `WORKER_API_KEY`, `ALBUM_SESSION_SECRET`
 
 **自动生成密钥**: 部署脚本会自动为以下变量生成安全的随机值：
 - `STORAGE_ACCESS_KEY`、`STORAGE_SECRET_KEY`（MinIO 凭证）
 - `WORKER_API_KEY`（Worker API 认证）
 - `ALBUM_SESSION_SECRET`（JWT 会话签名）
+- `DATABASE_PASSWORD`（PostgreSQL 密码）
 
 > 📖 **完整配置指南**: 查看 [.env.example](.env.example) 了解所有可用选项
 
@@ -334,7 +330,7 @@ MIT License © 2026 junyuzhan
 ## 🙏 致谢
 
 - [Next.js](https://nextjs.org/) - React 框架
-- [Supabase](https://supabase.com/) - 后端即服务
+- [PostgreSQL](https://www.postgresql.org/) - 关系型数据库
 - [MinIO](https://min.io/) - 对象存储
 - [Sharp](https://sharp.pixelplumbing.com/) - 图片处理
 - [Tailwind CSS](https://tailwindcss.com/) - CSS 框架
@@ -372,13 +368,19 @@ MIT License © 2026 junyuzhan
 - **[使用指南](./docs/USER_GUIDE.md)** - 图片风格预设和批量下载完整指南
 - **[实现状态](./docs/IMPLEMENTATION_STATUS.md)** - 功能实现跟踪
 - **[移动端优化](./docs/MOBILE_OPTIMIZATION.md)** - 移动端用户体验改进
+- **[脚本工具集](./scripts/README.md)** - 所有可用脚本和工具
+
+> 📚 **完整文档索引**: [docs/README.md](./docs/README.md)
 
 ### 快速开始
 - [部署指南](docs/i18n/zh-CN/DEPLOYMENT.md) - 详细的部署步骤（包含一键部署快速开始）
+- [部署检查清单](docs/DEPLOYMENT_CHECKLIST.md) - 部署前检查清单
+- [脚本工具集](scripts/README.md) - 所有可用脚本和工具
 
 ### 开发与安全
 - [开发指南](docs/DEVELOPMENT.md) - 开发环境搭建、代码规范、功能文档和所有功能说明
 - [安全指南](docs/SECURITY.md) - 安全最佳实践、部署检查清单和开源前安全检查清单
+- [脚本工具集](scripts/README.md) - 所有可用脚本和工具
 
 ---
 

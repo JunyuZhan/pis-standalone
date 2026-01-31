@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
 import { checkRateLimit } from '@/middleware-rate-limit'
+import { verifyPasswordSchema, albumSlugSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ slug: string }>
@@ -8,15 +10,54 @@ interface RouteParams {
 
 /**
  * 验证相册密码 API
- * POST /api/public/albums/[slug]/verify-password
- *
- * 安全措施：
- * 1. 基于 IP 的速率限制（防止暴力破解）
- * 2. 基于相册的速率限制（防止针对特定相册的攻击）
+ * 
+ * @route POST /api/public/albums/[slug]/verify-password
+ * @description 验证相册访问密码，用于访客访问受密码保护的相册
+ * 
+ * @auth 无需认证（公开接口）
+ * 
+ * @security
+ * - 基于 IP 的速率限制（防止暴力破解）
+ *   - 公网 IP：每分钟最多 10 次
+ *   - 内网 IP：每分钟最多 30 次
+ * - 基于相册的速率限制（防止针对特定相册的攻击）：每分钟最多 5 次
+ * 
+ * @param {string} slug - 相册标识（URL友好格式）
+ * 
+ * @body {Object} requestBody - 密码验证请求体
+ * @body {string} requestBody.password - 相册访问密码（必填）
+ * 
+ * @returns {Object} 200 - 密码验证成功
+ * @returns {boolean} 200.data.verified - 验证是否通过（true）
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败或密码错误）
+ * @returns {Object} 403 - 禁止访问（相册已过期）
+ * @returns {Object} 404 - 相册不存在
+ * @returns {Object} 429 - 请求过于频繁（速率限制）
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @example
+ * ```typescript
+ * const response = await fetch('/api/public/albums/my-album/verify-password', {
+ *   method: 'POST',
+ *   headers: { 'Content-Type': 'application/json' },
+ *   body: JSON.stringify({
+ *     password: 'album-password'
+ *   })
+ * })
+ * ```
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { slug } = await params
+    const paramsData = await params
+    
+    // 验证路径参数
+    const slugValidation = safeValidate(albumSlugSchema, paramsData)
+    if (!slugValidation.success) {
+      return handleError(slugValidation.error, '无效的相册标识')
+    }
+    
+    const { slug } = slugValidation.data
     
     // 获取客户端 IP 地址（与登录API使用相同的IP提取逻辑）
     const forwardedFor = request.headers.get('x-forwarded-for')
@@ -106,57 +147,45 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       )
     }
     
-    // 解析请求体
-    interface VerifyPasswordRequestBody {
-      password: string
-    }
-    let body: VerifyPasswordRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
-    }
-    
-    const { password } = body
-
-    if (!password || typeof password !== 'string') {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '请提供密码' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
 
-    const supabase = await createClient()
+    // 验证输入
+    const validation = safeValidate(verifyPasswordSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
+    const { password } = validation.data
+
+    const db = await createClient()
 
     // 获取相册信息（包含密码）
-    const { data: album, error } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, password, expires_at, deleted_at')
       .eq('slug', slug)
       .single()
 
-    if (error || !album || album.deleted_at) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data || albumResult.data.deleted_at) {
+      return ApiError.notFound('相册不存在')
     }
+
+    const album = albumResult.data
 
     // 检查相册是否过期
     if (album.expires_at && new Date(album.expires_at) < new Date()) {
-      return NextResponse.json(
-        { error: { code: 'EXPIRED', message: '相册已过期' } },
-        { status: 403 }
-      )
+      return ApiError.forbidden('相册已过期')
     }
 
     // 如果没有设置密码，直接通过
     if (!album.password) {
-      return NextResponse.json({ verified: true })
+      return createSuccessResponse({ verified: true })
     }
 
     // 验证密码（明文比较）
@@ -164,18 +193,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const passwordVerified = album.password === password
 
     if (passwordVerified) {
-      return NextResponse.json({ verified: true })
+      return createSuccessResponse({ verified: true })
     } else {
-      return NextResponse.json(
-        { error: { code: 'INVALID_PASSWORD', message: '密码错误' } },
-        { status: 401 }
-      )
+      return ApiError.validation('密码错误')
     }
-  } catch {
-    console.error('Verify password API error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '密码验证失败')
   }
 }

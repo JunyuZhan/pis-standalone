@@ -1,24 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import { getAlbumShareUrl } from '@/lib/utils'
 import type { AlbumInsert, Json } from '@/types/database'
+import { createAlbumSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
- * 相册列表 API
- * - GET: 获取所有相册
- * - POST: 创建新相册
+ * 相册管理 API
+ * 
+ * @route GET /api/admin/albums
+ * @route POST /api/admin/albums
+ * @description 相册列表和创建接口
  */
 
-// GET /api/admin/albums - 获取相册列表
+/**
+ * 获取相册列表
+ * 
+ * @route GET /api/admin/albums
+ * @description 获取所有相册（支持分页和筛选）
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @query {number} [page=1] - 页码（从1开始）
+ * @query {number} [limit=50] - 每页数量
+ * @query {boolean} [is_public] - 筛选公开状态（true/false）
+ * 
+ * @returns {Object} 200 - 成功返回相册列表
+ * @returns {Object[]} 200.data.albums - 相册数组
+ * @returns {Object} 200.data.pagination - 分页信息
+ * @returns {number} 200.data.pagination.page - 当前页码
+ * @returns {number} 200.data.pagination.limit - 每页数量
+ * @returns {number} 200.data.pagination.total - 总数量
+ * @returns {number} 200.data.pagination.totalPages - 总页数
+ * 
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 500 - 服务器内部错误
+ */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
     const { searchParams } = new URL(request.url)
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
       return NextResponse.json(
@@ -36,12 +61,12 @@ export async function GET(request: NextRequest) {
     const isPublic = searchParams.get('is_public')
 
     // 构建查询
-    let query = supabase
+    let query = db
       .from('albums')
-      .select('*', { count: 'exact' })
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
+      .limit(limit)
+      .offset(offset)
 
     // 可选：按公开状态筛选
     if (isPublic === 'true') {
@@ -50,41 +75,84 @@ export async function GET(request: NextRequest) {
       query = query.eq('is_public', false)
     }
 
-    const { data, error, count } = await query
+    const result = await query
 
-    if (error) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: error.message } },
-        { status: 500 }
-      )
+    if (result.error) {
+      return handleError(result.error, '查询相册列表失败')
     }
 
+    // 从查询结果获取 count（如果支持）
+    const total = result.count || result.data?.length || 0
+
     return NextResponse.json({
-      albums: data,
+      albums: result.data || [],
       pagination: {
         page,
         limit,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit),
+        total,
+        totalPages: Math.ceil(total / limit),
       },
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '查询相册列表失败')
   }
 }
 
-// POST /api/admin/albums - 创建新相册
+/**
+ * 创建新相册
+ * 
+ * @route POST /api/admin/albums
+ * @description 创建新的相册
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @body {Object} requestBody - 相册数据
+ * @body {string} requestBody.title - 相册标题（必填，1-200字符）
+ * @body {string} [requestBody.description] - 相册描述（可选，最多1000字符）
+ * @body {string} [requestBody.slug] - 相册标识（可选，自动生成）
+ * @body {string} [requestBody.event_date] - 活动日期（可选，ISO 8601格式）
+ * @body {string} [requestBody.location] - 活动地点（可选，最多200字符）
+ * @body {boolean} [requestBody.is_public=false] - 是否公开（可选，默认false）
+ * @body {string} [requestBody.password] - 访问密码（可选）
+ * @body {string} [requestBody.expires_at] - 过期时间（可选，ISO 8601格式）
+ * @body {string} [requestBody.layout='masonry'] - 布局类型（可选，masonry/grid/carousel）
+ * @body {string} [requestBody.sort_rule='capture_desc'] - 排序规则（可选）
+ * @body {boolean} [requestBody.allow_download=false] - 允许下载（可选）
+ * @body {boolean} [requestBody.allow_batch_download=true] - 允许批量下载（可选）
+ * @body {boolean} [requestBody.show_exif=true] - 显示EXIF信息（可选）
+ * @body {boolean} [requestBody.allow_share=true] - 允许分享（可选）
+ * @body {Object} [requestBody.settings] - 其他设置（可选）
+ * 
+ * @returns {Object} 200 - 创建成功
+ * @returns {Object} 200.data - 创建的相册数据
+ * @returns {string} 200.data.id - 相册ID
+ * @returns {string} 200.data.slug - 相册标识
+ * @returns {string} 200.data.title - 相册标题
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 409 - 冲突（slug已存在）
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @example
+ * ```typescript
+ * const response = await fetch('/api/admin/albums', {
+ *   method: 'POST',
+ *   headers: { 'Content-Type': 'application/json' },
+ *   body: JSON.stringify({
+ *     title: '我的相册',
+ *     description: '相册描述',
+ *     is_public: true
+ *   })
+ * })
+ * ```
+ */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
       return NextResponse.json(
@@ -93,35 +161,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 解析请求体
-    interface CreateAlbumRequestBody {
-      title: string
-      description?: string | null
-      event_date?: string | null
-      location?: string | null
-      poster_image_url?: string | null
-      is_public?: boolean
-      layout?: 'masonry' | 'grid' | 'carousel'
-      sort_rule?: 'capture_desc' | 'capture_asc' | 'manual'
-      allow_download?: boolean
-      allow_batch_download?: boolean
-      show_exif?: boolean
-      watermark_enabled?: boolean
-      watermark_type?: 'text' | 'logo' | null
-      watermark_config?: Json
-      color_grading?: { preset?: string } | null  // 新增：调色配置
-    }
-    let body: CreateAlbumRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
-    
+
+    // 验证输入
+    const validation = safeValidate(createAlbumSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
     const {
       title,
       description,
@@ -129,118 +182,22 @@ export async function POST(request: NextRequest) {
       location,
       poster_image_url,
       is_public,
+      isPublic,
       layout,
       sort_rule,
       allow_download,
       allow_batch_download,
+      allowBatchDownload,
       show_exif,
       watermark_enabled,
       watermark_type,
       watermark_config,
-      color_grading,  // 新增：调色配置
-    } = body
+      color_grading,
+    } = validation.data
 
-    // 验证必填字段
-    if (!title || !title.trim()) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '相册标题不能为空' } },
-        { status: 400 }
-      )
-    }
-
-    // 验证标题长度
-    if (title.length > 100) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '相册标题不能超过100个字符' } },
-        { status: 400 }
-      )
-    }
-
-    // 验证布局类型
-    if (layout && !['masonry', 'grid', 'carousel'].includes(layout)) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '无效的布局类型' } },
-        { status: 400 }
-      )
-    }
-
-    // 验证排序规则
-    if (sort_rule && !['capture_desc', 'capture_asc', 'manual'].includes(sort_rule)) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '无效的排序规则' } },
-        { status: 400 }
-      )
-    }
-
-    // 验证水印类型
-    if (watermark_type && !['text', 'logo'].includes(watermark_type)) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '无效的水印类型' } },
-        { status: 400 }
-      )
-    }
-
-    // 验证调色配置格式
-    let validatedColorGrading: { preset?: string } | null = null
-    if (color_grading !== undefined) {
-      if (color_grading === null) {
-        validatedColorGrading = null
-      } else if (typeof color_grading === 'object' && color_grading !== null) {
-        const config = color_grading as Record<string, unknown>
-        if (config.preset && typeof config.preset === 'string' && config.preset.trim() !== '') {
-          validatedColorGrading = { preset: config.preset.trim() }
-        } else {
-          return NextResponse.json(
-            { error: { code: 'VALIDATION_ERROR', message: '调色配置必须包含有效的 preset 字段' } },
-            { status: 400 }
-          )
-        }
-      } else {
-        return NextResponse.json(
-          { error: { code: 'VALIDATION_ERROR', message: '调色配置格式错误' } },
-          { status: 400 }
-        )
-      }
-    }
-
-    // 验证海报图片URL格式和安全性
-    let validatedPosterImageUrl: string | null = null
-    if (poster_image_url && poster_image_url.trim()) {
-      try {
-        const url = new URL(poster_image_url.trim())
-        // 只允许 http 和 https 协议
-        if (!['http:', 'https:'].includes(url.protocol)) {
-          return NextResponse.json(
-            { error: { code: 'VALIDATION_ERROR', message: '海报图片URL必须使用 http 或 https 协议' } },
-            { status: 400 }
-          )
-        }
-        // 检查是否为内网地址（SSRF 防护）
-        const hostname = url.hostname.toLowerCase()
-        const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
-        const isPrivateIP =
-          hostname.startsWith('192.168.') ||
-          hostname.startsWith('10.') ||
-          (hostname.startsWith('172.') &&
-            parseInt(hostname.split('.')[1] || '0') >= 16 &&
-            parseInt(hostname.split('.')[1] || '0') <= 31) ||
-          hostname.endsWith('.local')
-
-        if (isLocalhost || isPrivateIP) {
-          return NextResponse.json(
-            { error: { code: 'VALIDATION_ERROR', message: '海报图片URL不能使用内网地址' } },
-            { status: 400 }
-          )
-        }
-
-        validatedPosterImageUrl = poster_image_url.trim()
-      } catch {
-        return NextResponse.json(
-          { error: { code: 'VALIDATION_ERROR', message: '海报图片URL格式无效' } },
-          { status: 400 }
-        )
-      }
-    }
+    // 处理兼容性（支持两种命名方式）
+    const finalIsPublic = is_public ?? isPublic ?? false
+    const finalAllowBatchDownload = allow_batch_download ?? allowBatchDownload ?? false
 
     // 构建插入数据
     const insertData: AlbumInsert = {
@@ -248,39 +205,35 @@ export async function POST(request: NextRequest) {
       description: description?.trim() || null,
       event_date: event_date || null,
       location: location?.trim() || null,
-      poster_image_url: validatedPosterImageUrl,
-      is_public: is_public ?? false,
+      poster_image_url: poster_image_url || null,
+      is_public: finalIsPublic,
       layout: layout || 'masonry',
       sort_rule: sort_rule || 'capture_desc',
       allow_download: allow_download ?? true,
-      allow_batch_download: allow_batch_download ?? false, // 默认关闭，需要管理员明确开启
+      allow_batch_download: finalAllowBatchDownload, // 默认关闭，需要管理员明确开启
       show_exif: show_exif ?? true,
       allow_share: true, // 默认允许分享
       watermark_enabled: watermark_enabled ?? false,
       watermark_type: watermark_type || null,
       watermark_config: (watermark_config || {}) as Json,
-      color_grading: validatedColorGrading as Json | null,  // 新增：调色配置
+      color_grading: color_grading as Json | null,  // 新增：调色配置
     }
 
     // 创建相册
-    const { data, error } = await supabase
-      .from('albums')
-      .insert(insertData)
-      .select()
-      .single()
+    const result = await db.insert('albums', insertData)
 
-    if (error) {
+    if (result.error) {
       // 处理唯一约束冲突（slug 重复）
-      if (error.code === '23505') {
-        return NextResponse.json(
-          { error: { code: 'DUPLICATE_ERROR', message: '相册创建失败，请重试' } },
-          { status: 409 }
-        )
+      const errorMessage = result.error.message || ''
+      if (errorMessage.includes('23505') || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key')) {
+        return ApiError.validation('相册创建失败，请重试（可能是 slug 重复）')
       }
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: error.message } },
-        { status: 500 }
-      )
+      return handleError(result.error, '创建相册失败')
+    }
+
+    const data = result.data && result.data.length > 0 ? result.data[0] : null
+    if (!data) {
+      return ApiError.internal('创建相册失败')
     }
 
     // 生成分享URL（添加错误处理）
@@ -295,17 +248,14 @@ export async function POST(request: NextRequest) {
     }
 
     // 返回创建结果
-    return NextResponse.json({
+    return createSuccessResponse({
       id: data.id,
       slug: data.slug,
       title: data.title,
       is_public: data.is_public,
       shareUrl,
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '创建相册失败')
   }
 }

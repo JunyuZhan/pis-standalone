@@ -12,7 +12,7 @@
  */
 
 import { NextRequest } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/database";
 import {
   validateAlbumSessionToken,
   AlbumSessionData,
@@ -45,16 +45,16 @@ export async function verifyAlbumAuth(
   slug: string,
 ): Promise<AlbumAuthResult> {
   try {
-    const supabase = await createClient();
+    const db = await createClient();
 
     // Get album info
-    const { data: album, error } = await supabase
+    const albumResult = await db
       .from("albums")
       .select("id, slug, password, expires_at, deleted_at")
       .eq("slug", slug)
       .single();
 
-    if (error || !album || album.deleted_at) {
+    if (albumResult.error || !albumResult.data || albumResult.data.deleted_at) {
       return {
         authorized: false,
         error: {
@@ -63,6 +63,8 @@ export async function verifyAlbumAuth(
         },
       };
     }
+
+    const album = albumResult.data
 
     // Check if album has expired
     if (album.expires_at && new Date(album.expires_at) < new Date()) {

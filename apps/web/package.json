@@ -17,7 +17,7 @@
     "test:coverage": "vitest run --coverage",
     "test:integration": "bash scripts/test-integration.sh",
     "test:ui": "vitest --ui",
-    "supabase:types": "supabase gen types typescript --project-id YOUR_PROJECT_ID > src/types/database.ts"
+    "db:types": "echo 'Database types are managed manually. See docker/init-postgresql-db.sql for schema.'"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.0",
@@ -36,8 +36,12 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.400.0",
     "minio": "^8.0.0",
+    "zod": "^3.23.8",
     "next": "^15.5.7",
+    "pg": "^8.13.1",
     "next-intl": "^3.15.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^13.0.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
@@ -54,6 +58,7 @@
     "@testing-library/react": "^14.1.2",
     "@testing-library/user-event": "^14.5.1",
     "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.10",
     "@types/react": "^19.2.9",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^4.0.18",

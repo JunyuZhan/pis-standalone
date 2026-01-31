@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { albumIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
 }
-
 
 /**
  * 触发扫描同步
@@ -12,31 +14,33 @@ interface RouteParams {
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id: albumId } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(albumIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的相册ID')
+    }
+    
+    const albumId = idValidation.data.id
+    const db = await createClient()
 
     // 验证登录状态
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 验证相册存在
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id, title')
       .eq('id', albumId)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'ALBUM_NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
     // 使用代理路由调用 Worker 扫描 API
@@ -64,19 +68,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!workerResponse.ok) {
       const error = await workerResponse.json()
-      return NextResponse.json(
-        { error: { code: 'WORKER_ERROR', message: error.error || 'Worker 服务错误' } },
-        { status: 500 }
-      )
+      return ApiError.internal(`Worker 服务错误: ${error.error || '未知错误'}`)
     }
 
     const result = await workerResponse.json()
     return NextResponse.json(result)
-  } catch {
-    console.error('Scan API error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '扫描相册失败')
   }
 }

@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { Eye, EyeOff, Loader2, Check } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 
 export function ChangePasswordForm() {
   const [loading, setLoading] = useState(false)
@@ -43,15 +42,22 @@ export function ChangePasswordForm() {
     }
 
     try {
-      const supabase = createClient()
-      
-      // 更新密码
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: formData.newPassword,
+      // 调用 API 路由更新密码
+      const response = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          currentPassword: formData.currentPassword,
+          newPassword: formData.newPassword,
+        }),
       })
 
-      if (updateError) {
-        setError(updateError.message || '密码修改失败')
+      const data = await response.json()
+
+      if (!response.ok) {
+        setError(data.error?.message || '密码修改失败')
         return
       }
 

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { batchOperationSchema, batchUpdateSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 相册批量操作 API
@@ -8,206 +11,130 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface DeleteBatchRequestBody {
-      albumIds: string[]
-    }
-    let body: DeleteBatchRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
-    }
-    
-    const { albumIds } = body
-
-    if (!Array.isArray(albumIds) || albumIds.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '请选择要删除的相册' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
 
-    // 限制批量删除数量
-    if (albumIds.length > 50) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '单次最多删除50个相册' } },
-        { status: 400 }
-      )
+    // 验证输入（注意：batchOperationSchema 包含 operation，但这里只支持 delete）
+    const validation = safeValidate(batchOperationSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
+    const { albumIds, operation } = validation.data
+
+    // 验证操作类型
+    if (operation !== 'delete') {
+      return ApiError.badRequest(`不支持的操作类型: ${operation}`)
     }
 
     // 验证相册存在且未删除
-    const { data: albumsData, error: checkError } = await supabase
+    const albumsResult = await db
       .from('albums')
       .select('id, title')
       .in('id', albumIds)
       .is('deleted_at', null)
 
-    if (checkError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: checkError.message } },
-        { status: 500 }
-      )
+    if (albumsResult.error) {
+      return handleError(albumsResult.error, '查询相册失败')
     }
 
-    const validAlbums = albumsData as { id: string; title: string }[] | null
+    const validAlbums = albumsResult.data as { id: string; title: string }[] | null
     const validAlbumIds = validAlbums?.map((a) => a.id) || []
 
     if (validAlbumIds.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '未找到有效的相册' } },
-        { status: 404 }
-      )
+      return ApiError.notFound('未找到有效的相册')
     }
 
     // 执行软删除
-    const { error: deleteError } = await supabase
-      .from('albums')
-      .update({ deleted_at: new Date().toISOString() })
-      .in('id', validAlbumIds)
-      .is('deleted_at', null)
+    // 批量更新：为每个相册ID执行更新操作
+    const deletePromises = validAlbumIds.map((id) => 
+      db.update('albums', { deleted_at: new Date().toISOString() }, { id, deleted_at: null })
+    )
+    const deleteResults = await Promise.all(deletePromises)
+    const deleteError = deleteResults.find((r) => r.error)?.error
 
     if (deleteError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: deleteError.message } },
-        { status: 500 }
-      )
+      return handleError(deleteError, '批量删除相册失败')
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       deletedCount: validAlbumIds.length,
       message: `已删除 ${validAlbumIds.length} 个相册`,
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '批量删除相册失败')
   }
 }
 
 // PATCH /api/admin/albums/batch - 批量更新相册
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface UpdateBatchRequestBody {
-      albumIds: string[]
-      updates: {
-        is_public?: boolean
-        layout?: 'masonry' | 'grid' | 'carousel'
-        sort_rule?: 'capture_desc' | 'capture_asc' | 'manual'
-        allow_download?: boolean
-        show_exif?: boolean
-      }
-    }
-    let body: UpdateBatchRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
-    }
-    
-    const { albumIds, updates } = body
-
-    if (!Array.isArray(albumIds) || albumIds.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '请选择要更新的相册' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
 
-    if (!updates || typeof updates !== 'object') {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '更新数据无效' } },
-        { status: 400 }
-      )
+    // 验证输入
+    const validation = safeValidate(batchUpdateSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
 
-    // 限制批量更新数量
-    if (albumIds.length > 50) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '单次最多更新50个相册' } },
-        { status: 400 }
-      )
-    }
+    const { albumIds, updates } = validation.data
 
     // 构建更新数据（只允许更新特定字段）
-    const allowedFields = ['is_public', 'layout', 'sort_rule', 'allow_download', 'show_exif'] as const
     const updateData: Record<string, boolean | string> = {}
     
-    for (const field of allowedFields) {
-      const fieldValue = (updates as Record<string, unknown>)[field]
-      if (fieldValue !== undefined) {
-        updateData[field] = fieldValue as boolean | string
-      }
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '没有有效的更新字段' } },
-        { status: 400 }
-      )
-    }
+    if (updates.is_public !== undefined) updateData.is_public = updates.is_public
+    if (updates.layout !== undefined) updateData.layout = updates.layout
+    if (updates.sort_rule !== undefined) updateData.sort_rule = updates.sort_rule
+    if (updates.allow_download !== undefined) updateData.allow_download = updates.allow_download
+    if (updates.show_exif !== undefined) updateData.show_exif = updates.show_exif
 
     // 执行批量更新
-    const { error: updateError } = await supabase
-      .from('albums')
-      .update(updateData)
-      .in('id', albumIds)
-      .is('deleted_at', null)
+    // 批量更新：为每个相册ID执行更新操作
+    const updatePromises = albumIds.map((id) => 
+      db.update('albums', updateData, { id, deleted_at: null })
+    )
+    const updateResults = await Promise.all(updatePromises)
+    const updateError = updateResults.find((r) => r.error)?.error
 
     if (updateError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: updateError.message } },
-        { status: 500 }
-      )
+      return handleError(updateError, '批量更新相册失败')
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       updatedCount: albumIds.length,
       message: `已更新 ${albumIds.length} 个相册`,
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '批量更新相册失败')
   }
 }

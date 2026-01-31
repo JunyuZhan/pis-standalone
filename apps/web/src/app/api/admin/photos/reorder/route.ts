@@ -1,90 +1,84 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { reorderPhotosSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 照片排序 API
- * PATCH /api/admin/photos/reorder - 批量更新照片排序
+ * 
+ * @route PATCH /api/admin/photos/reorder
+ * @description 批量更新照片的排序顺序
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @body {Object} requestBody - 排序请求体
+ * @body {string} requestBody.albumId - 相册ID（UUID格式，必填）
+ * @body {Array<Object>} requestBody.orders - 照片排序数组（必填）
+ * @body {string} requestBody.orders[].photoId - 照片ID（UUID格式）
+ * @body {number} requestBody.orders[].sortOrder - 排序值（数字，越小越靠前）
+ * 
+ * @returns {Object} 200 - 排序更新成功
+ * @returns {boolean} 200.data.success - 操作是否成功
+ * @returns {number} 200.data.updatedCount - 更新的照片数量
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 404 - 相册不存在
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @example
+ * ```typescript
+ * const response = await fetch('/api/admin/photos/reorder', {
+ *   method: 'PATCH',
+ *   headers: { 'Content-Type': 'application/json' },
+ *   body: JSON.stringify({
+ *     albumId: 'album-uuid',
+ *     orders: [
+ *       { photoId: 'photo-1', sortOrder: 1 },
+ *       { photoId: 'photo-2', sortOrder: 2 }
+ *     ]
+ *   })
+ * })
+ * ```
  */
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface ReorderRequestBody {
-      albumId: string
-      orders: Array<{ photoId: string; sortOrder: number }>
-    }
-    let body: ReorderRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
-    }
-    
-    const { albumId, orders } = body
-
-    // 验证参数
-    if (!albumId || typeof albumId !== 'string') {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '缺少相册ID' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
 
-    if (!Array.isArray(orders) || orders.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '排序数据不能为空' } },
-        { status: 400 }
-      )
+    // 验证输入
+    const validation = safeValidate(reorderPhotosSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
 
-    // 验证排序数据格式
-    for (const item of orders) {
-      if (!item.photoId || typeof item.sortOrder !== 'number') {
-        return NextResponse.json(
-          { error: { code: 'VALIDATION_ERROR', message: '排序数据格式错误' } },
-          { status: 400 }
-        )
-      }
-    }
-
-    // 限制批量操作数量
-    if (orders.length > 500) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '单次最多更新500张照片排序' } },
-        { status: 400 }
-      )
-    }
+    const { albumId, orders } = validation.data
 
     // 验证相册存在
-    const { data: album, error: albumError } = await supabase
+    const albumResult = await db
       .from('albums')
       .select('id')
       .eq('id', albumId)
       .is('deleted_at', null)
       .single()
 
-    if (albumError || !album) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '相册不存在' } },
-        { status: 404 }
-      )
+    if (albumResult.error || !albumResult.data) {
+      return ApiError.notFound('相册不存在')
     }
 
     // 批量更新排序
@@ -92,41 +86,26 @@ export async function PATCH(request: NextRequest) {
     const photoIds = orders.map((o) => o.photoId)
 
     // 先验证所有照片都属于该相册
-    const { data: photos, error: checkError } = await supabase
+    const photosResult = await db
       .from('photos')
       .select('id')
       .eq('album_id', albumId)
       .in('id', photoIds)
 
-    if (checkError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: checkError.message } },
-        { status: 500 }
-      )
+    if (photosResult.error) {
+      return handleError(photosResult.error, '查询照片失败')
     }
 
-    const validPhotoIds = new Set(photos?.map((p) => p.id) || [])
+    const validPhotoIds = new Set(photosResult.data?.map((p: { id: string }) => p.id) || [])
     const invalidIds = photoIds.filter((id) => !validPhotoIds.has(id))
 
     if (invalidIds.length > 0) {
-      return NextResponse.json(
-        { 
-          error: { 
-            code: 'VALIDATION_ERROR', 
-            message: `部分照片不属于该相册: ${invalidIds.slice(0, 5).join(', ')}...` 
-          } 
-        },
-        { status: 400 }
-      )
+      return ApiError.validation(`部分照片不属于该相册: ${invalidIds.slice(0, 5).join(', ')}...`)
     }
 
     // 执行批量更新
     const updatePromises = orders.map((item) =>
-      supabase
-        .from('photos')
-        .update({ sort_order: item.sortOrder })
-        .eq('id', item.photoId)
-        .eq('album_id', albumId)
+      db.update('photos', { sort_order: item.sortOrder }, { id: item.photoId, album_id: albumId })
     )
 
     const results = await Promise.all(updatePromises)
@@ -134,27 +113,18 @@ export async function PATCH(request: NextRequest) {
     // 检查是否有失败
     const errors = results.filter((r) => r.error)
     if (errors.length > 0) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: '部分更新失败' } },
-        { status: 500 }
-      )
+      return handleError(errors[0].error, '部分更新失败')
     }
 
     // 更新相册的 sort_rule 为 manual
-    await supabase
-      .from('albums')
-      .update({ sort_rule: 'manual' })
-      .eq('id', albumId)
+    await db.update('albums', { sort_rule: 'manual' }, { id: albumId })
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       updatedCount: orders.length,
       message: `已更新 ${orders.length} 张照片的排序`,
     })
-  } catch {
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '更新照片排序失败')
   }
 }

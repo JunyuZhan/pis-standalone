@@ -28,16 +28,40 @@ for (const envPath of envPaths) {
     config({ path: envPath });
     envLoaded = true;
     loadedEnvPath = envPath;
-    console.log('✅ Loaded environment variables from:', envPath);
     break;
   }
 }
-if (!envLoaded) {
-  console.warn('⚠️  No .env file found. Tried paths:', envPaths.join(', '));
-  console.warn('   Environment variables will be read from system environment or process.env');
+
+// 初始化 logger（需要在加载环境变量之后）
+// 使用动态导入确保环境变量已加载
+let logger: any;
+try {
+  const loggerModule = await import('./lib/logger.js');
+  logger = loggerModule.default;
+  
+  if (envLoaded && loadedEnvPath) {
+    logger.info({ path: loadedEnvPath }, '✅ Loaded environment variables');
+  } else {
+    logger.warn({ paths: envPaths }, '⚠️  No .env file found. Environment variables will be read from system environment');
+  }
+} catch (err) {
+  // 如果 logger 初始化失败，回退到 console
+  console.warn('Failed to initialize logger, falling back to console:', err);
+  logger = {
+    info: (...args: any[]) => console.log(...args),
+    warn: (...args: any[]) => console.warn(...args),
+    error: (...args: any[]) => console.error(...args),
+    fatal: (...args: any[]) => console.error(...args),
+    debug: (...args: any[]) => console.debug(...args),
+  };
+  if (envLoaded && loadedEnvPath) {
+    console.log('✅ Loaded environment variables from:', loadedEnvPath);
+  } else {
+    console.warn('⚠️  No .env file found. Tried paths:', envPaths.join(', '));
+  }
 }
+
 import http from 'http';
-import crypto from 'crypto';
 import { Worker, Job, Queue } from 'bullmq';
 import { connection, QUEUE_NAME, photoQueue } from './lib/redis.js';
 import { 
@@ -64,6 +88,7 @@ import { purgePhotoCache } from './lib/cloudflare-purge.js';
 import { alertService } from './lib/alert.js';
 import { createSupabaseCompatClient, SupabaseCompatClient } from './lib/database/supabase-compat.js';
 import { createPostgreSQLCompatClient, PostgreSQLCompatClient } from './lib/database/postgresql-compat.js';
+// logger 已在上面通过动态导入初始化
 
 // 初始化数据库客户端
 // PIS Standalone 版本支持 Supabase（云端）和 PostgreSQL（自托管）两种数据库后端
@@ -72,24 +97,24 @@ let supabase: SupabaseCompatClient | PostgreSQLCompatClient;
 
 if (dbType === 'postgresql') {
   // PostgreSQL 模式：使用 PostgreSQL 适配器
-  console.log('📊 Database mode: PostgreSQL (standalone)');
+  logger.info('📊 Database mode: PostgreSQL (standalone)');
   try {
     supabase = createPostgreSQLCompatClient();
-    console.log(`✅ Database client initialized (mode: postgresql)`);
+    logger.info('✅ Database client initialized', { mode: 'postgresql' });
   } catch (err: any) {
-    console.error('❌ Failed to initialize PostgreSQL database client:', err.message);
-    console.error('   Please set DATABASE_HOST, DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD');
+    logger.fatal({ err }, '❌ Failed to initialize PostgreSQL database client');
+    logger.error('   Please set DATABASE_HOST, DATABASE_NAME, DATABASE_USER, DATABASE_PASSWORD');
     process.exit(1);
   }
 } else {
   // Supabase 模式：使用 Supabase 客户端
-  console.log('📊 Database mode: Supabase (cloud)');
+  logger.info('📊 Database mode: Supabase (cloud)');
   try {
     supabase = createSupabaseCompatClient();
-    console.log(`✅ Database client initialized (mode: supabase)`);
+    logger.info('✅ Database client initialized', { mode: 'supabase' });
   } catch (err: any) {
-    console.error('❌ Failed to initialize Supabase database client:', err.message);
-    console.error('   Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
+    logger.fatal({ err }, '❌ Failed to initialize Supabase database client');
+    logger.error('   Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
     process.exit(1);
   }
 }

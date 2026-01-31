@@ -4,7 +4,7 @@
  * 提供用于集成测试的工具函数，帮助创建和清理测试数据。
  */
 
-import { createAdminClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/database'
 import { v4 as uuidv4 } from 'uuid'
 
 export interface TestAlbum {
@@ -26,7 +26,7 @@ export interface TestPhoto {
  * 创建测试相册
  */
 export async function createTestAlbum(overrides: Partial<TestAlbum> = {}): Promise<TestAlbum> {
-  const adminClient = createAdminClient()
+  const adminClient = await createAdminClient()
   
   const albumData = {
     title: overrides.title || `Test Album ${Date.now()}`,
@@ -51,7 +51,7 @@ export async function createTestAlbum(overrides: Partial<TestAlbum> = {}): Promi
  * 删除测试相册
  */
 export async function deleteTestAlbum(albumId: string): Promise<void> {
-  const adminClient = createAdminClient()
+  const adminClient = await createAdminClient()
   
   // 先删除相册中的所有照片
   await adminClient.from('photos').delete().eq('album_id', albumId)
@@ -71,7 +71,7 @@ export async function createTestPhoto(
   albumId: string,
   overrides: Partial<TestPhoto> = {}
 ): Promise<TestPhoto> {
-  const adminClient = createAdminClient()
+  const adminClient = await createAdminClient()
   
   const photoData = {
     id: overrides.id || uuidv4(),
@@ -99,7 +99,7 @@ export async function createTestPhoto(
  * 删除测试照片
  */
 export async function deleteTestPhoto(photoId: string): Promise<void> {
-  const adminClient = createAdminClient()
+  const adminClient = await createAdminClient()
   
   const { error } = await adminClient.from('photos').delete().eq('id', photoId)
   
@@ -114,7 +114,7 @@ export async function deleteTestPhoto(photoId: string): Promise<void> {
 export async function deleteTestPhotos(photoIds: string[]): Promise<void> {
   if (photoIds.length === 0) return
 
-  const adminClient = createAdminClient()
+  const adminClient = await createAdminClient()
   
   const { error } = await adminClient.from('photos').delete().in('id', photoIds)
   

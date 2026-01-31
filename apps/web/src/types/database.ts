@@ -1,8 +1,13 @@
 /**
- * Supabase 数据库类型定义
+ * PostgreSQL 数据库类型定义
  * 
  * 注意：类型定义已手动维护，与数据库schema保持同步。
- * 如需自动生成类型，可运行：`supabase gen types typescript --project-id <project-id> > apps/web/src/types/database.ts`
+ * 数据库架构定义在 `docker/init-postgresql-db.sql` 中（`docker/schema.sql` 是符号链接）。
+ * 
+ * 如需更新类型定义，请：
+ * 1. 更新数据库架构文件
+ * 2. 手动更新此文件以保持同步
+ * 3. 或使用 PostgreSQL 类型生成工具（如 pgtyped）
  */
 
 export type Json =

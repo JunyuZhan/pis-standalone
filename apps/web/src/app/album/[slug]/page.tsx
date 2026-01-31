@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
 import { AlbumClient } from '@/components/album/album-client'
 import { AlbumHero } from '@/components/album/album-hero'
 import { AlbumInfoBar } from '@/components/album/album-info-bar'
@@ -26,16 +26,16 @@ interface AlbumPageProps {
  */
 export async function generateMetadata({ params }: AlbumPageProps): Promise<Metadata> {
   const { slug } = await params
-  const supabase = await createClient()
+  const db = await createClient()
 
-  const { data: album } = await supabase
+  const albumResult = await db
     .from('albums')
     .select('title, description, share_title, share_description, share_image_url, poster_image_url, cover_photo_id, slug')
     .eq('slug', slug)
     .is('deleted_at', null)
     .single()
 
-  if (!album) {
+  if (!albumResult.data) {
     return {
       title: '相册不存在',
     }
@@ -44,6 +44,8 @@ export async function generateMetadata({ params }: AlbumPageProps): Promise<Meta
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
   const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || 'http://localhost:9000/pis-photos'
   
+  const album = albumResult.data
+
   // 使用自定义分享配置，如果没有则使用默认值
   const shareTitle = album.share_title || album.title
   const shareDescription = album.share_description || album.description || `查看 ${album.title} 的精彩照片`
@@ -57,11 +59,13 @@ export async function generateMetadata({ params }: AlbumPageProps): Promise<Meta
   
   // 如果还没有图片，使用封面图
   if (!shareImage && album.cover_photo_id) {
-    const { data: coverPhoto } = await supabase
+    const coverPhotoResult = await db
       .from('photos')
       .select('preview_key, thumb_key')
       .eq('id', album.cover_photo_id)
       .single()
+    
+    const coverPhoto = coverPhotoResult.data
     
     if (coverPhoto?.preview_key) {
       shareImage = `${mediaUrl}/${coverPhoto.preview_key}`
@@ -137,27 +141,31 @@ export async function generateMetadata({ params }: AlbumPageProps): Promise<Meta
 export default async function AlbumPage({ params, searchParams }: AlbumPageProps) {
   const { slug } = await params
   const { sort, layout, group, from, skip_splash } = await searchParams
-  const supabase = await createClient()
+  const db = await createClient()
 
   // 获取相册信息（包含密码和过期时间检查）
-  const { data: albumData, error: albumError } = await supabase
+  const albumResult = await db
     .from('albums')
     .select('*')
     .eq('slug', slug)
     .is('deleted_at', null)
     .single()
 
-  if (albumError || !albumData) {
+  if (albumResult.error || !albumResult.data) {
     notFound()
   }
 
+  const albumData = albumResult.data
+
   // 获取实际照片数量（确保计数准确，排除已删除的照片）
-  const { count: actualPhotoCount } = await supabase
+  const photoCountResult = await db
     .from('photos')
-    .select('*', { count: 'exact', head: true })
+    .select('*')
     .eq('album_id', albumData.id)
     .eq('status', 'completed')
-    .is('deleted_at', null) // 排除已删除的照片
+    .is('deleted_at', null)
+
+  const actualPhotoCount = photoCountResult.count || photoCountResult.data?.length || 0
 
   const album = {
     ...albumData,
@@ -194,38 +202,38 @@ export default async function AlbumPage({ params, searchParams }: AlbumPageProps
   }
 
   // 获取分组列表（如果相册有分组）
-  const { data: groupsData } = await supabase
+  const groupsResult = await db
     .from('photo_groups')
     .select('*')
     .eq('album_id', album.id)
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true })
 
-  const groups = groupsData || []
+  const groups = groupsResult.data || []
 
   // 获取照片列表（排除已删除的照片）
-  const { data: photosData } = await supabase
+  const photosResult = await db
     .from('photos')
     .select('*')
     .eq('album_id', album.id)
     .eq('status', 'completed')
-    .is('deleted_at', null) // 排除已删除的照片
+    .is('deleted_at', null)
     .order(orderBy, { ascending })
     .limit(20)
 
-  const photos = (photosData || []) as Photo[]
+  const photos = (photosResult.data || []) as Photo[]
 
   // 获取照片分组关联（如果相册有分组）
   const photoGroupMap: Map<string, string[]> = new Map()
   if (groups.length > 0) {
     for (const group of groups) {
-      const { data: assignments } = await supabase
+      const assignmentsResult = await db
         .from('photo_group_assignments')
         .select('photo_id')
         .eq('group_id', group.id)
       
-      if (assignments) {
-        photoGroupMap.set(group.id, assignments.map(a => a.photo_id))
+      if (assignmentsResult.data) {
+        photoGroupMap.set(group.id, assignmentsResult.data.map((a: any) => a.photo_id))
       }
     }
   }
@@ -234,13 +242,13 @@ export default async function AlbumPage({ params, searchParams }: AlbumPageProps
   // 注意：封面照片必须未删除
   let coverPhoto: Photo | null = null
   if (album.cover_photo_id) {
-    const { data: cover } = await supabase
+    const coverResult = await db
       .from('photos')
       .select('*')
       .eq('id', album.cover_photo_id)
-      .is('deleted_at', null) // 确保封面照片未删除
+      .is('deleted_at', null)
       .single()
-    coverPhoto = cover as Photo | null
+    coverPhoto = coverResult.data as Photo | null
   }
   if (!coverPhoto && photos.length > 0) {
     coverPhoto = photos[0]

@@ -11,7 +11,9 @@ type AnySupabaseClient = SupabaseClient<any, any, any>
 
 /**
  * 创建 Supabase 客户端（用于 Server Components）
- * PIS 使用 Supabase 作为唯一认证后端
+ * 
+ * ⚠️ 向后兼容层：仅在混合部署模式（DATABASE_TYPE=supabase）下使用
+ * 默认模式（DATABASE_TYPE=postgresql）使用 PostgreSQL 客户端
  */
 export async function createClient(): Promise<AnySupabaseClient> {
   const cookieStore = await cookies()

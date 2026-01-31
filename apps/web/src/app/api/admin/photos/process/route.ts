@@ -1,50 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { processPhotoSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
- * 触发照片处理
+ * 触发照片处理 API
+ * 
+ * @route POST /api/admin/photos/process
+ * @description 触发 Worker 服务处理照片（生成缩略图、预览图等）
+ * 
+ * @auth 需要管理员登录
+ * 
+ * @body {Object} requestBody - 照片处理请求体
+ * @body {string} requestBody.photoId - 照片ID（UUID格式，必填）
+ * @body {string} requestBody.albumId - 相册ID（UUID格式，必填）
+ * @body {string} requestBody.originalKey - 原始文件在存储中的键名（必填）
+ * 
+ * @returns {Object} 200 - 处理请求已提交
+ * @returns {boolean} 200.data.success - 操作是否成功
+ * 
+ * @returns {Object} 202 - 请求已接受，但 Worker 服务暂时不可用
+ * @returns {Object} 202.warning - 警告信息
+ * @returns {string} 202.warning.code - 警告代码（WORKER_UNAVAILABLE）
+ * @returns {string} 202.warning.message - 警告消息
+ * 
+ * @returns {Object} 400 - 请求参数错误（验证失败）
+ * @returns {Object} 401 - 未授权（需要登录）
+ * @returns {Object} 500 - 服务器内部错误
+ * 
+ * @note 如果 Worker 服务不可用，会返回 202 状态码，照片将在后台异步处理
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface ProcessRequestBody {
-      photoId: string
-      albumId: string
-      originalKey: string
-    }
-    let body: ProcessRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      console.error('Failed to parse request body:')
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
-    
-    const { photoId, albumId, originalKey } = body
 
-    if (!photoId || !albumId || !originalKey) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '缺少必要参数' } },
-        { status: 400 }
-      )
+    // 验证输入
+    const validation = safeValidate(processPhotoSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
+
+    const { photoId, albumId, originalKey } = validation.data
 
     // 使用代理路由调用 Worker API 触发处理
     // 代理路由会自动处理 Worker URL 配置和认证
@@ -100,12 +109,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ success: true })
-  } catch {
-    console.error('Process API error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+    return createSuccessResponse({ success: true })
+  } catch (error) {
+    return handleError(error, '触发照片处理失败')
   }
 }

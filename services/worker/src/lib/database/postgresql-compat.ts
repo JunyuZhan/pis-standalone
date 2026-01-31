@@ -161,12 +161,46 @@ class PostgresQueryBuilder<T = any> {
     return this;
   }
 
-  select(columns: string): this {
-    this.selectColumns = columns.split(',').map((c) => c.trim());
+  select(columns: string, options?: { count?: 'exact' | 'estimated'; head?: boolean }): this {
+    if (options?.count && options?.head) {
+      // 这是 count 查询，标记为 count 操作
+      (this as any).isCount = true;
+      (this as any).countType = options.count;
+    } else {
+      this.selectColumns = columns.split(',').map((c) => c.trim());
+    }
     return this;
   }
 
   async single(): Promise<{ data: T | null; error: Error | null }> {
+    // 检查是否是更新操作
+    if ((this as any).updateData) {
+      const result = await this.executeUpdate();
+      return {
+        data: result.data && result.data.length > 0 ? result.data[0] : null,
+        error: result.error,
+      };
+    }
+    
+    // 检查是否是删除操作
+    if ((this as any).isDelete) {
+      const result = await this.executeDelete();
+      return {
+        data: null,
+        error: result.error,
+      };
+    }
+    
+    // 检查是否是插入操作
+    if ((this as any).insertData) {
+      const result = await this.executeInsert();
+      return {
+        data: result.data && result.data.length > 0 ? result.data[0] : null,
+        error: result.error,
+      };
+    }
+    
+    // 默认查询操作
     this.limitValue = 1;
     const result = await this.adapter.findMany<T>(
       this.table,
@@ -185,10 +219,141 @@ class PostgresQueryBuilder<T = any> {
     };
   }
 
-  async then<TResult1 = { data: T[] | null; error: Error | null }, TResult2 = never>(
-    onfulfilled?: ((value: { data: T[] | null; error: Error | null }) => TResult1 | PromiseLike<TResult1>) | null,
+  /**
+   * 更新记录
+   */
+  update(data: Partial<T>): this {
+    (this as any).updateData = data;
+    return this;
+  }
+
+  /**
+   * 删除记录
+   */
+  delete(): this {
+    (this as any).isDelete = true;
+    return this;
+  }
+
+  /**
+   * 插入记录
+   */
+  insert(data: T | T[]): this {
+    (this as any).insertData = data;
+    return this;
+  }
+
+  /**
+   * 执行更新操作
+   */
+  async executeUpdate(): Promise<{ data: T[] | null; error: Error | null }> {
+    const updateData = (this as any).updateData;
+    if (!updateData) {
+      return { data: null, error: new Error('No data provided for update') };
+    }
+    
+    const result = await this.adapter.update<T>(
+      this.table,
+      this.filters,
+      updateData
+    );
+    
+    // 如果有 select 列，需要重新查询
+    if (this.selectColumns && result.data) {
+      const selectResult = await this.adapter.findMany<T>(
+        this.table,
+        this.filters,
+        {
+          select: this.selectColumns,
+          limit: this.limitValue,
+          offset: this.offsetValue,
+          orderBy: this.orderBy.length > 0 ? this.orderBy : undefined,
+        }
+      );
+      return selectResult;
+    }
+    
+    return result;
+  }
+
+  /**
+   * 执行删除操作
+   */
+  async executeDelete(): Promise<{ error: Error | null }> {
+    return await this.adapter.delete(this.table, this.filters);
+  }
+
+  /**
+   * 执行插入操作
+   */
+  async executeInsert(): Promise<{ data: T[] | null; error: Error | null }> {
+    const insertData = (this as any).insertData;
+    if (!insertData) {
+      return { data: null, error: new Error('No data provided for insert') };
+    }
+    
+    return await this.adapter.insert<T>(this.table, insertData);
+  }
+
+  /**
+   * 支持链式调用的 then 方法（用于查询）
+   */
+  async then<TResult1 = { data: T[] | null; error: Error | null; count?: number | null } | { count: number | null; error: Error | null }, TResult2 = never>(
+    onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
+    // 检查是否是 count 查询
+    if ((this as any).isCount) {
+      const countResult = await this.count();
+      const countResponse = { count: countResult.data, error: countResult.error };
+      if (countResult.error && onrejected) {
+        return onrejected(countResult.error);
+      }
+      if (onfulfilled) {
+        return onfulfilled(countResponse);
+      }
+      return countResponse as TResult1;
+    }
+    
+    // 检查是否是更新操作
+    if ((this as any).updateData) {
+      const result = await this.executeUpdate();
+      if (result.error && onrejected) {
+        return onrejected(result.error);
+      }
+      if (onfulfilled) {
+        return onfulfilled(result);
+      }
+      return result as TResult1;
+    }
+    
+    // 检查是否是删除操作
+    if ((this as any).isDelete) {
+      const result = await this.executeDelete();
+      if (result.error && onrejected) {
+        return onrejected(result.error);
+      }
+      // 删除操作返回 { error: null }，需要转换为标准格式
+      const deleteResult = { data: null, error: result.error };
+      if (onfulfilled) {
+        return onfulfilled(deleteResult);
+      }
+      return deleteResult as TResult1;
+    }
+    
+    // 检查是否是插入操作
+    if ((this as any).insertData) {
+      const result = await this.executeInsert();
+      if (result.error && onrejected) {
+        return onrejected(result.error);
+      }
+      if (onfulfilled) {
+        return onfulfilled(result);
+      }
+      return result as TResult1;
+    }
+    
+    // 默认查询操作
     const result = await this.adapter.findMany<T>(
       this.table,
       this.filters,
@@ -209,6 +374,27 @@ class PostgresQueryBuilder<T = any> {
     }
     
     return result as TResult1;
+  }
+
+  /**
+   * not 方法（用于过滤条件）
+   */
+  not(column: string, operator: string, value: any): this {
+    // PostgreSQL 的 NOT 操作
+    this.filters[`!${column}:${operator}`] = value;
+    return this;
+  }
+
+  /**
+   * count 方法（用于计数）
+   */
+  async count(): Promise<{ data: number | null; error: Error | null }> {
+    try {
+      const count = await this.adapter.count(this.table, this.filters);
+      return { data: count, error: null };
+    } catch (err: any) {
+      return { data: null, error: err };
+    }
   }
 }
 

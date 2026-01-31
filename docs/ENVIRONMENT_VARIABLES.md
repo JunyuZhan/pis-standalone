@@ -92,14 +92,22 @@ bash docker/deploy.sh
 
 ```bash
 # ==================== 数据库配置 ====================
-# Supabase 项目 URL（前端和后端都需要）
-NEXT_PUBLIC_SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
+# 数据库类型：postgresql（自托管）或 supabase（云服务，向后兼容）
+DATABASE_TYPE=postgresql
 
-# Supabase 匿名密钥（前端使用，会暴露到浏览器）
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhcGt1ZmtpYXZocnh4Y3V6cHRtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNjk4MzcsImV4cCI6MjA4NDY0NTgzN30.gY5jX5mUgLra4j8REzSKcF95YnNVRkRBO4UP1GEQKiA
+# PostgreSQL 连接配置（方式1：使用连接字符串）
+# DATABASE_URL=postgresql://user:password@host:5432/database?sslmode=require
 
-# Supabase 服务角色密钥（服务端 API 使用，敏感信息）
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhcGt1ZmtpYXZocnh4Y3V6cHRtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTA2OTgzNywiZXhwIjoyMDg0NjQ1ODM3fQ._SBsaMXaHea6taM9F3lgvQcph4t_iAQ4IB7-B1VLJRQ
+# PostgreSQL 连接配置（方式2：分别配置，推荐）
+DATABASE_HOST=postgres.example.com
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=your-secure-password
+DATABASE_SSL=true
+
+# 认证 JWT 密钥（用于会话管理，必须与 Worker 服务器一致）
+AUTH_JWT_SECRET=your-jwt-secret-key-at-least-32-characters-long
 
 # ==================== 媒体服务器配置 ====================
 # 前端访问媒体服务器的公网 URL（通过 frpc 反向代理）
@@ -149,9 +157,15 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 
 | 变量名 | 类型 | 必需 | 说明 | 示例值 |
 |--------|------|------|------|--------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Public | ✅ | Supabase 项目 URL | `https://xxx.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public | ✅ | Supabase 匿名密钥（前端） | `eyJhbGci...` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Private | ✅ | Supabase 服务角色密钥（服务端） | `eyJhbGci...` |
+| `DATABASE_TYPE` | Private | ✅ | 数据库类型 | `postgresql` 或 `supabase` |
+| `DATABASE_URL` | Private | ❌ | PostgreSQL 连接字符串（方式1） | `postgresql://user:pass@host:5432/db` |
+| `DATABASE_HOST` | Private | ✅* | PostgreSQL 主机地址 | `postgres.example.com` |
+| `DATABASE_PORT` | Private | ❌ | PostgreSQL 端口 | `5432` |
+| `DATABASE_NAME` | Private | ✅* | PostgreSQL 数据库名 | `pis` |
+| `DATABASE_USER` | Private | ✅* | PostgreSQL 用户名 | `pis` |
+| `DATABASE_PASSWORD` | Private | ✅* | PostgreSQL 密码 | `your-secure-password` |
+| `DATABASE_SSL` | Private | ❌ | 是否使用 SSL | `true` 或 `false` |
+| `AUTH_JWT_SECRET` | Private | ✅ | JWT 签名密钥（会话管理） | `your-jwt-secret-key...` |
 | `NEXT_PUBLIC_MEDIA_URL` | Public | ✅ | 媒体服务器公网 URL（HTTPS） | `https://media.example.com/pis-photos` |
 | `NEXT_PUBLIC_WORKER_URL` | Public | ✅ | Worker API 公网 URL（HTTPS） | `https://worker.example.com` |
 | `WORKER_API_URL` | Private | ✅ | Worker API URL（服务端，兼容） | `https://worker.example.com` |
@@ -165,6 +179,12 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 | `CLOUDFLARE_ZONE_ID` | Private | ❌ | Cloudflare Zone ID | `55be2d2f25313170ff6a622cda4c37ec` |
 
 **说明**:
+- ✅* 表示如果未使用 `DATABASE_URL`，则这些变量是必需的
+- **Public**: `NEXT_PUBLIC_*` 前缀的变量会暴露到浏览器，不要包含敏感信息
+- **Private**: 无前缀的变量仅在服务端使用，可以包含敏感信息
+- **必需**: ✅ 表示应用运行必需，❌ 表示可选
+
+**说明**:
 - **Public**: `NEXT_PUBLIC_*` 前缀的变量会暴露到浏览器，不要包含敏感信息
 - **Private**: 无前缀的变量仅在服务端使用，可以包含敏感信息
 - **必需**: ✅ 表示应用运行必需，❌ 表示可选
@@ -173,10 +193,12 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 
 在 Vercel Dashboard 中检查以下配置：
 
+- [ ] `DATABASE_TYPE=postgresql` 已设置（自托管模式）
+- [ ] PostgreSQL 连接配置已正确设置（`DATABASE_URL` 或分别配置 `DATABASE_HOST` 等）
+- [ ] `AUTH_JWT_SECRET` 已配置（至少 32 字符，与 Worker 服务器一致）
 - [ ] `NEXT_PUBLIC_MEDIA_URL` 使用 **HTTPS**（不是 HTTP）
 - [ ] `NEXT_PUBLIC_WORKER_URL` 使用 **HTTPS**（不是 HTTP）
 - [ ] `WORKER_API_KEY` 与 Worker 服务器配置**完全一致**（区分大小写）
-- [ ] `SUPABASE_SERVICE_ROLE_KEY` 已配置（服务端 API 需要）
 - [ ] 所有 `NEXT_PUBLIC_*` 变量已正确设置（前端会使用）
 - [ ] 环境范围已正确选择（Production/Preview/Development）
 
@@ -198,7 +220,16 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 - 检查 Vercel 和 Worker 服务器的 `WORKER_API_KEY` 是否完全相同
 - 确保没有多余的空格或换行符
 
-#### 3. 图片加载失败（ERR_HTTP2_PROTOCOL_ERROR）
+#### 3. 数据库连接失败
+
+**原因**: PostgreSQL 连接配置错误
+
+**解决**: 
+- 检查 `DATABASE_URL` 格式是否正确，或分别检查 `DATABASE_HOST`、`DATABASE_PORT`、`DATABASE_NAME`、`DATABASE_USER`、`DATABASE_PASSWORD`
+- 确保数据库服务器允许来自 Vercel IP 的连接
+- 如果使用 SSL，确保 `DATABASE_SSL=true` 且数据库服务器支持 SSL
+
+#### 4. 图片加载失败（ERR_HTTP2_PROTOCOL_ERROR）
 
 **原因**: `NEXT_PUBLIC_MEDIA_URL` 使用了 HTTP 或配置错误
 
@@ -217,8 +248,19 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 
 ```bash
 # ==================== 数据库配置 ====================
-SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhcGt1ZmtpYXZocnh4Y3V6cHRtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTA2OTgzNywiZXhwIjoyMDg0NjQ1ODM3fQ._SBsaMXaHea6taM9F3lgvQcph4t_iAQ4IB7-B1VLJRQ
+# 数据库类型
+DATABASE_TYPE=postgresql
+
+# PostgreSQL 连接配置（使用 Docker 内部网络）
+DATABASE_HOST=postgres                    # Docker Compose 服务名
+DATABASE_PORT=5432                        # PostgreSQL 容器内部端口
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=AUTO_GENERATE           # 由部署脚本自动生成
+DATABASE_SSL=false                        # Docker 内部网络不需要 SSL
+
+# 认证 JWT 密钥（必须与前端配置一致）
+AUTH_JWT_SECRET=AUTO_GENERATE_32          # 由部署脚本自动生成
 
 # ==================== MinIO 存储配置 ====================
 # Worker 使用 Docker 内部网络连接 MinIO
@@ -278,11 +320,18 @@ TURNSTILE_SECRET_KEY=0x4AAAAAAA5vowGPXhxUGUkqVTMvC-YaLNk
 # ===========================================
 
 # ==================== 数据库配置 ====================
-DATABASE_TYPE=supabase
-NEXT_PUBLIC_SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhcGt1ZmtpYXZocnh4Y3V6cHRtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNjk4MzcsImV4cCI6MjA4NDY0NTgzN30.gY5jX5mUgLra4j8REzSKcF95YnNVRkRBO4UP1GEQKiA
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhhcGt1ZmtpYXZocnh4Y3V6cHRtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTA2OTgzNywiZXhwIjoyMDg0NjQ1ODM3fQ._SBsaMXaHea6taM9F3lgvQcph4t_iAQ4IB7-B1VLJRQ
-SUPABASE_URL=https://hapkufkiavhrxxcuzptm.supabase.co
+DATABASE_TYPE=postgresql
+
+# PostgreSQL 连接配置（本地开发）
+DATABASE_HOST=localhost
+DATABASE_PORT=5432
+DATABASE_NAME=pis
+DATABASE_USER=pis
+DATABASE_PASSWORD=your-local-password
+DATABASE_SSL=false
+
+# 认证 JWT 密钥（本地开发可以使用简单密钥）
+AUTH_JWT_SECRET=local-dev-secret-key-change-in-production
 
 # ==================== MinIO 存储配置 ====================
 # 注意: NEXT_PUBLIC_MEDIA_URL 用于前端访问，STORAGE_ENDPOINT 用于后端连接
@@ -339,11 +388,15 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 
 | 变量名 | 位置 | 说明 | 示例值 |
 |--------|------|------|--------|
-| `DATABASE_TYPE` | 本地 | 数据库类型 | `supabase` |
-| `NEXT_PUBLIC_SUPABASE_URL` | Vercel | Supabase 项目 URL | `https://xxx.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel | Supabase 匿名密钥（前端） | `eyJhbGci...` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Vercel/Worker | Supabase 服务角色密钥（服务端） | `eyJhbGci...` |
-| `SUPABASE_URL` | Worker | Supabase URL（兼容） | `https://xxx.supabase.co` |
+| `DATABASE_TYPE` | 所有 | 数据库类型 | `postgresql` 或 `supabase` |
+| `DATABASE_URL` | 所有 | PostgreSQL 连接字符串（可选） | `postgresql://user:pass@host:5432/db` |
+| `DATABASE_HOST` | 所有 | PostgreSQL 主机地址 | `localhost` 或 `postgres.example.com` |
+| `DATABASE_PORT` | 所有 | PostgreSQL 端口 | `5432` |
+| `DATABASE_NAME` | 所有 | PostgreSQL 数据库名 | `pis` |
+| `DATABASE_USER` | 所有 | PostgreSQL 用户名 | `pis` |
+| `DATABASE_PASSWORD` | 所有 | PostgreSQL 密码 | `your-secure-password` |
+| `DATABASE_SSL` | 所有 | 是否使用 SSL | `true` 或 `false` |
+| `AUTH_JWT_SECRET` | 所有 | JWT 签名密钥（会话管理） | `your-jwt-secret-key...` |
 
 ### 存储配置
 
@@ -405,10 +458,12 @@ CLOUDFLARE_ZONE_ID=55be2d2f25313170ff6a622cda4c37ec
 
 ### Vercel 配置检查
 
+- [ ] `DATABASE_TYPE=postgresql` 已设置
+- [ ] PostgreSQL 连接配置已正确设置
+- [ ] `AUTH_JWT_SECRET` 已配置（至少 32 字符）
 - [ ] `NEXT_PUBLIC_MEDIA_URL` 使用 HTTPS
 - [ ] `NEXT_PUBLIC_WORKER_URL` 使用 HTTPS
 - [ ] `WORKER_API_KEY` 与 Worker 服务器一致
-- [ ] `SUPABASE_SERVICE_ROLE_KEY` 已配置（服务端 API 需要）
 
 ### Worker 服务器配置检查
 
@@ -500,14 +555,32 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 # 方法 3: 使用在线密码生成器（至少 32 字符）
 ```
 
-### 获取 Supabase 密钥
+### 生成 JWT Secret
 
-1. 登录 [Supabase Dashboard](https://app.supabase.com)
-2. 选择项目 → Settings → API
-3. 复制以下密钥:
-   - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-   - `anon public` → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `service_role` → `SUPABASE_SERVICE_ROLE_KEY`
+```bash
+# 方法 1: 使用 openssl
+openssl rand -hex 32
+
+# 方法 2: 使用 Node.js
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# 方法 3: 使用在线密码生成器（至少 32 字符）
+```
+
+### 配置 PostgreSQL 数据库
+
+1. **创建数据库**:
+   ```sql
+   CREATE DATABASE pis;
+   CREATE USER pis WITH PASSWORD 'your-secure-password';
+   GRANT ALL PRIVILEGES ON DATABASE pis TO pis;
+   ```
+
+2. **运行数据库迁移**:
+   ```bash
+   # 参考 docs/RESET_DATABASE.md
+   psql -U pis -d pis -f docker/init-postgresql-db.sql
+   ```
 
 ### 获取 Cloudflare 配置
 

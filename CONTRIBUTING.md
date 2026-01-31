@@ -13,7 +13,7 @@ Thank you for your interest in contributing to PIS! This document provides guide
 
 ### Reporting Bugs
 
-1. Check if the bug has already been reported in [Issues](https://github.com/JunyuZhan/pis-cloud/issues)
+1. Check if the bug has already been reported in [Issues](https://github.com/JunyuZhan/pis-standalone/issues)
 2. If not, create a new issue with:
    - Clear title and description
    - Steps to reproduce

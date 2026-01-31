@@ -3,13 +3,12 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { Camera, Images, Settings, LogOut, Home } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { LanguageSwitcher } from '@/components/ui/language-switcher'
 import { cn } from '@/lib/utils'
-import type { User } from '@supabase/supabase-js'
+import type { AuthUser } from '@/lib/auth'
 
 interface AdminSidebarProps {
-  user: User
+  user: AuthUser
 }
 
 const navItems = [
@@ -17,13 +16,16 @@ const navItems = [
   { href: '/admin/settings', label: '系统设置', icon: Settings },
 ]
 
-export function SidebarContent({ user }: { user: User }) {
+export function SidebarContent({ user }: { user: AuthUser }) {
   const pathname = usePathname()
   const router = useRouter()
 
   const handleLogout = async () => {
-    const supabase = createClient()
-    await supabase.auth.signOut()
+    try {
+      await fetch('/api/auth/signout', { method: 'POST' })
+    } catch (error) {
+      console.error('Logout error:', error)
+    }
     router.push('/admin/login')
     router.refresh()
   }

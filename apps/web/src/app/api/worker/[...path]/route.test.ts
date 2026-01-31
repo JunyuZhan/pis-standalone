@@ -33,7 +33,7 @@ describe('Worker API Proxy', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     
-    const { createClientFromRequest } = await import('@/lib/supabase/server')
+    const { createClientFromRequest } = await import('@/lib/database')
     const mockRequest = createMockRequest('http://localhost:3000/api/worker/health')
     mockSupabaseClient = createClientFromRequest(mockRequest)
     mockAuth = mockSupabaseClient.auth

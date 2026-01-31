@@ -1,4 +1,4 @@
-# 重置 Supabase 数据库指南
+# 重置数据库指南
 
 ## ⚠️ 警告
 
@@ -7,9 +7,63 @@
 - 了解重置的影响
 - 在生产环境谨慎操作
 
-## 方法一：使用 SQL 脚本（推荐）
+## PostgreSQL（推荐）
 
-### 步骤
+### 方法一：使用 SQL 脚本（推荐）
+
+```bash
+# 连接到数据库
+psql -U pis -d pis
+
+# 执行重置脚本（删除所有表）
+\i docker/reset-postgresql-db.sql
+
+# 重新初始化数据库
+\i docker/init-postgresql-db.sql
+```
+
+### 方法二：使用 Docker
+
+```bash
+# 停止服务
+docker-compose -f docker/docker-compose.standalone.yml down
+
+# 删除数据库卷（⚠️ 这会删除所有数据）
+docker volume rm pis_postgres_data
+
+# 重新启动服务（会自动初始化数据库）
+docker-compose -f docker/docker-compose.standalone.yml up -d postgres
+```
+
+### 方法三：手动删除表
+
+```sql
+-- 连接到数据库
+psql -U pis -d pis
+
+-- 删除所有表（按依赖顺序）
+DROP TABLE IF EXISTS photo_group_assignments CASCADE;
+DROP TABLE IF EXISTS photo_groups CASCADE;
+DROP TABLE IF EXISTS package_downloads CASCADE;
+DROP TABLE IF EXISTS album_templates CASCADE;
+DROP TABLE IF EXISTS photos CASCADE;
+DROP TABLE IF EXISTS albums CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+
+-- 删除所有函数和触发器
+DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
+DROP FUNCTION IF EXISTS increment_photo_count(UUID) CASCADE;
+DROP FUNCTION IF EXISTS decrement_photo_count(UUID) CASCADE;
+DROP FUNCTION IF EXISTS increment_album_view_count(UUID) CASCADE;
+DROP FUNCTION IF EXISTS update_album_selected_count() CASCADE;
+
+-- 重新初始化数据库
+\i docker/init-postgresql-db.sql
+```
+
+## Supabase（向后兼容）
+
+### 方法一：使用 SQL 脚本
 
 1. **打开 Supabase Dashboard**
    - 访问 https://supabase.com/dashboard
@@ -29,7 +83,7 @@
 4. **重新初始化数据库**
    - 执行 `docker/init-supabase-db.sql` 重新创建表结构
 
-## 方法二：使用 Supabase CLI
+### 方法二：使用 Supabase CLI
 
 ```bash
 # 安装 Supabase CLI（如果未安装）

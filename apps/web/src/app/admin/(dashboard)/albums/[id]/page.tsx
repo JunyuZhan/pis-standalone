@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft, Settings } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
 import { getAlbumShareUrl } from '@/lib/utils'
 import { AlbumDetailClient } from '@/components/admin/album-detail-client'
 import { ShareLinkButton } from '@/components/admin/share-link-button'
@@ -20,46 +20,50 @@ interface AlbumDetailPageProps {
  */
 export default async function AlbumDetailPage({ params }: AlbumDetailPageProps) {
   const { id } = await params
-  const supabase = await createClient()
+  const db = await createClient()
 
   // 获取相册信息
-  const { data: albumData, error: albumError } = await supabase
-    .from('albums')
+  const albumResult = await db
+    .from<Album>('albums')
     .select('*')
     .eq('id', id)
     .is('deleted_at', null)
     .single()
 
-  if (albumError || !albumData) {
+  if (albumResult.error || !albumResult.data) {
     notFound()
   }
+
+  const albumData = albumResult.data as Album
 
   // 获取照片列表，同时统计数量（包含 rotation 字段）
   // 管理后台显示所有状态的照片（包括处理中的），以便管理员查看处理进度
   // 注意：只查询未删除的照片，已删除的照片通过 API 的 showDeleted 参数获取
-  const { data: photos } = await supabase
+  const photosResult = await db
     .from('photos')
     .select('*, rotation')
     .eq('album_id', id)
     .in('status', ['pending', 'processing', 'completed'])
-    .is('deleted_at', null) // 排除已删除的照片
+    .is('deleted_at', null)
     .order('sort_order', { ascending: true })
+    .execute()
+
+  const photos = photosResult.data || []
 
   // 统计已完成的照片数量（用于显示，排除已删除的照片）
-  const { count: actualPhotoCount } = await supabase
+  const photoCountResult = await db
     .from('photos')
-    .select('*', { count: 'exact', head: true })
+    .select('*')
     .eq('album_id', id)
     .eq('status', 'completed')
-    .is('deleted_at', null) // 排除已删除的照片
+    .is('deleted_at', null)
+    .execute()
+
+  const photoCount = photoCountResult.count || photoCountResult.data?.length || 0
 
   // 如果实际照片数量与存储的不一致，更新数据库
-  const photoCount = actualPhotoCount ?? 0
   if (photoCount !== albumData.photo_count) {
-    await supabase
-      .from('albums')
-      .update({ photo_count: photoCount })
-      .eq('id', id)
+    await db.update('albums', { photo_count: photoCount }, { id })
   }
 
   const album = {
@@ -83,11 +87,13 @@ export default async function AlbumDetailPage({ params }: AlbumDetailPageProps) 
   if (album.poster_image_url && album.poster_image_url.trim()) {
     backgroundImageUrl = album.poster_image_url.trim()
   } else if (album.cover_photo_id) {
-    const { data: coverPhoto } = await supabase
+    const coverPhotoResult = await db
       .from('photos')
       .select('preview_key, thumb_key')
       .eq('id', album.cover_photo_id)
       .single()
+    
+    const coverPhoto = coverPhotoResult.data
     
     if (coverPhoto?.preview_key) {
       const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || 'http://localhost:9000/pis-photos'
@@ -146,7 +152,7 @@ export default async function AlbumDetailPage({ params }: AlbumDetailPageProps) 
       </div>
 
       {/* 客户端组件：上传和照片网格 */}
-      <AlbumDetailClient album={album} initialPhotos={photos || []} />
+      <AlbumDetailClient album={album} initialPhotos={photos} />
     </div>
   )
 }

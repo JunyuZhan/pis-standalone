@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { reprocessPhotoSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 批量重新生成预览图 API
@@ -11,41 +14,34 @@ import { createClient } from '@/lib/supabase/server'
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface ReprocessRequestBody {
-      photoIds?: string[] // 可选：指定要重新处理的照片ID，如果不提供则处理所有照片
-      albumId?: string // 可选：指定相册ID，只处理该相册的照片
-    }
-
-    let body: ReprocessRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
 
-    const { photoIds, albumId } = body
+    // 验证输入
+    const validation = safeValidate(reprocessPhotoSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
+    }
+
+    const { photoIds, albumId } = validation.data
 
     // 构建查询：获取需要重新处理的照片（排除已删除的）
     // 支持处理 completed 和 failed 状态的照片
-    let query = supabase
+    let query = db
       .from('photos')
       .select('id, album_id, original_key, status')
       .in('status', ['completed', 'failed']) // 支持处理已完成和失败状态的照片
@@ -53,14 +49,7 @@ export async function POST(request: NextRequest) {
       .is('deleted_at', null) // 排除已删除的照片
 
     // 如果指定了照片ID，只处理这些照片
-    if (photoIds && Array.isArray(photoIds) && photoIds.length > 0) {
-      // 限制批量处理数量
-      if (photoIds.length > 100) {
-        return NextResponse.json(
-          { error: { code: 'VALIDATION_ERROR', message: '单次最多重新处理100张照片' } },
-          { status: 400 }
-        )
-      }
+    if (photoIds && photoIds.length > 0) {
       query = query.in('id', photoIds)
     }
 
@@ -69,26 +58,21 @@ export async function POST(request: NextRequest) {
       query = query.eq('album_id', albumId)
     }
 
-    // 如果没有指定任何条件，返回错误（防止误操作处理所有照片）
-    if (!photoIds && !albumId) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '请指定要重新处理的照片ID或相册ID' } },
-        { status: 400 }
-      )
+    const result = await query
+
+    if (result.error) {
+      return handleError(result.error, '查询照片失败')
     }
 
-    const { data: photos, error: queryError } = await query
-
-    if (queryError) {
-      console.error('Query photos error:', queryError)
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: queryError.message } },
-        { status: 500 }
-      )
-    }
+    const photos = result.data as Array<{
+      id: string
+      album_id: string
+      original_key: string
+      status: string
+    }>
 
     if (!photos || photos.length === 0) {
-      return NextResponse.json({
+      return createSuccessResponse({
         success: true,
         message: '没有需要重新处理的照片',
         queued: 0,
@@ -116,10 +100,7 @@ export async function POST(request: NextRequest) {
         batch.map(async (photo) => {
           try {
             // 先将状态设置为 pending，以便重新处理
-            await supabase
-              .from('photos')
-              .update({ status: 'pending' })
-              .eq('id', photo.id)
+            await db.update('photos', { status: 'pending' }, { id: photo.id })
 
             // 使用代理路由调用 Worker API 触发处理
             const headers: HeadersInit = {
@@ -149,26 +130,20 @@ export async function POST(request: NextRequest) {
               const errorText = await processRes.text()
               errors.push(`照片 ${photo.id}: ${errorText}`)
               // 恢复状态
-              await supabase
-                .from('photos')
-                .update({ status: 'completed' })
-                .eq('id', photo.id)
+              await db.update('photos', { status: 'completed' }, { id: photo.id })
             }
           } catch (error) {
             failedCount++
             const errorMessage = error instanceof Error ? error.message : '未知错误'
             errors.push(`照片 ${photo.id}: ${errorMessage}`)
             // 恢复状态
-            await supabase
-              .from('photos')
-              .update({ status: 'completed' })
-              .eq('id', photo.id)
+            await db.update('photos', { status: 'completed' }, { id: photo.id })
           }
         })
       )
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       message: `已排队 ${queuedCount} 张照片重新处理`,
       queued: queuedCount,
@@ -176,12 +151,7 @@ export async function POST(request: NextRequest) {
       total: photos.length,
       ...(errors.length > 0 && { errors: errors.slice(0, 10) }), // 最多返回10个错误
     })
-  } catch (err) {
-    console.error('Reprocess photos API error:', err)
-    const errorMessage = err instanceof Error ? err.message : '未知错误'
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误：' + errorMessage } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '重新处理照片失败')
   }
 }

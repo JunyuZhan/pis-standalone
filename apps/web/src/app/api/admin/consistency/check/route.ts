@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { consistencyCheckSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 数据一致性检查 API
@@ -18,32 +20,27 @@ import { createClient } from '@/lib/supabase/server'
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface CheckRequestBody {
-      autoFix?: boolean
-      deleteOrphanedFiles?: boolean
-      deleteOrphanedRecords?: boolean
-      batchSize?: number
-    }
-    let body: CheckRequestBody
+    // 解析和验证请求体（允许空请求体）
+    let body: unknown = {}
     try {
-      body = await request.json()
+      const bodyText = await request.text()
+      if (bodyText) {
+        body = JSON.parse(bodyText)
+      }
     } catch {
       body = {}
+    }
+
+    const bodyValidation = safeValidate(consistencyCheckSchema, body)
+    if (!bodyValidation.success) {
+      return handleError(bodyValidation.error, '输入验证失败')
     }
 
     const {
@@ -51,22 +48,7 @@ export async function POST(request: NextRequest) {
       deleteOrphanedFiles = false,
       deleteOrphanedRecords = false,
       batchSize = 100,
-    } = body
-
-    // 验证参数
-    if (deleteOrphanedFiles && !autoFix) {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '删除孤儿文件需要启用 autoFix' } },
-        { status: 400 }
-      )
-    }
-
-    if (deleteOrphanedRecords && !autoFix) {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '删除孤儿记录需要启用 autoFix' } },
-        { status: 400 }
-      )
-    }
+    } = bodyValidation.data
 
     // 调用 Worker API 执行检查
     const requestUrl = new URL(request.url)
@@ -98,10 +80,7 @@ export async function POST(request: NextRequest) {
       if (!response.ok) {
         const errorText = await response.text()
         console.error('Worker consistency check error:', response.status, errorText)
-        return NextResponse.json(
-          { error: { code: 'WORKER_ERROR', message: `检查失败: ${errorText}` } },
-          { status: response.status }
-        )
+        return ApiError.internal(`检查失败: ${errorText}`)
       }
 
       const result = await response.json()
@@ -115,17 +94,10 @@ export async function POST(request: NextRequest) {
       const errorMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error'
       console.error('Failed to call worker:', errorMsg)
 
-      return NextResponse.json(
-        { error: { code: 'WORKER_UNAVAILABLE', message: 'Worker 服务不可用，请稍后重试' } },
-        { status: 503 }
-      )
+      return ApiError.internal('Worker 服务不可用，请稍后重试')
     }
-  } catch {
-    console.error('Consistency check API error:')
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '服务器错误' } },
-      { status: 500 }
-    )
+  } catch (error) {
+    return handleError(error, '一致性检查失败')
   }
 }
 

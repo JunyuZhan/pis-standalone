@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/database'
 import type { Database } from '@/types/database'
 import { AlbumSettingsForm } from '@/components/admin/album-settings-form'
 
@@ -18,21 +18,21 @@ export default async function AlbumSettingsPage({
   params,
 }: AlbumSettingsPageProps) {
   const { id } = await params
-  const supabase = await createClient()
+  const db = await createClient()
 
   // 获取相册信息
-  const { data: albumData, error } = await supabase
+  const albumResult = await db
     .from('albums')
     .select('*')
     .eq('id', id)
     .is('deleted_at', null)
     .single()
 
-  if (error || !albumData) {
+  if (albumResult.error || !albumResult.data) {
     notFound()
   }
 
-  const album = albumData as Album
+  const album = albumResult.data as Album
 
   return (
     <div className="max-w-2xl">

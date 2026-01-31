@@ -25,7 +25,7 @@ describe('GET /api/public/albums/[slug]/photos', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     
-    const { createClient } = await import('@/lib/supabase/server')
+    const { createClient } = await import('@/lib/database')
     mockSupabaseClient = await createClient()
   })
 

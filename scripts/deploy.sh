@@ -6,7 +6,7 @@
 # 两种使用方式：
 # 
 # 1. 在服务器上直接运行（推荐）：
-#    curl -sSL https://raw.githubusercontent.com/junyuzhan/pis/main/scripts/deploy.sh | bash
+#    curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/deploy.sh | bash
 #    
 # 2. 在本地运行，远程部署：
 #    git clone https://github.com/JunyuZhan/pis-standalone.git && cd pis-standalone
@@ -111,7 +111,7 @@ load_language() {
         MSG_USE_EXISTING="使用现有代码"
         MSG_CLONE_SUCCESS="代码克隆完成"
         MSG_DB_SUPABASE="Supabase 云数据库"
-        MSG_DB_SUPABASE_REC="(推荐)"
+        MSG_DB_STANDALONE_REC="(推荐)"
         MSG_DB_STANDALONE="完全自托管 PostgreSQL"
         MSG_DB_STANDALONE_DESC="(包含 Web、PostgreSQL、MinIO、Redis、Worker、Nginx)"
         MSG_SELECT_DB="请选择部署模式 [1-2，默认: 2]:"
@@ -174,14 +174,14 @@ load_language() {
         MSG_BUILD_SOLUTIONS="解决方案："
         MSG_BUILD_SOLUTION_1="  1. 检查网络连接: ping 8.8.8.8"
         MSG_BUILD_SOLUTION_2="  2. 检查 DNS 配置: cat /etc/resolv.conf"
-        MSG_BUILD_SOLUTION_3="  3. 手动构建: cd /opt/pis && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
+        MSG_BUILD_SOLUTION_3="  3. 手动构建: cd \${DEPLOY_DIR} && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
         MSG_SKIP_BUILD="是否跳过 Worker 构建，仅启动其他服务? [y/N]:"
         MSG_SKIP_BUILD_WARN="跳过 Worker 构建，将使用 docker-compose.yml 中的 build 配置"
         MSG_BUILD_FAILED_EXIT="Worker 构建失败，无法继续部署"
         MSG_BUILD_LOG_SAVED="构建日志已保存到:"
         MSG_BUILD_MANUAL="请尝试："
         MSG_BUILD_MANUAL_1="  1. 检查网络连接和 DNS 配置"
-        MSG_BUILD_MANUAL_2="  2. 手动构建: cd /opt/pis && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
+        MSG_BUILD_MANUAL_2="  2. 手动构建: cd \${DEPLOY_DIR} && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
         MSG_BUILD_MANUAL_3="  3. 或使用预构建镜像: docker pull junyuzhan/pis-worker:latest"
         MSG_UPDATED_COMPOSE="已更新 docker-compose.yml 使用预构建镜像"
     else
@@ -210,7 +210,7 @@ load_language() {
         MSG_USE_EXISTING="Using existing code"
         MSG_CLONE_SUCCESS="Code cloned successfully"
         MSG_DB_SUPABASE="Supabase Cloud Database"
-        MSG_DB_SUPABASE_REC="(Recommended)"
+        MSG_DB_STANDALONE_REC="(Recommended)"
         MSG_DB_STANDALONE="Fully Self-Hosted PostgreSQL"
         MSG_DB_STANDALONE_DESC="(includes Web, PostgreSQL, MinIO, Redis, Worker, Nginx)"
         MSG_SELECT_DB="Select deployment mode [1-2, default: 2]:"
@@ -245,7 +245,7 @@ load_language() {
         MSG_DB_INIT="⚠️  Important: Database Schema Initialization"
         MSG_DB_INIT_DESC="After deployment, you need to initialize the database schema:"
         MSG_DB_INIT_SUPABASE="Supabase: Execute docker/init-supabase-db.sql in Dashboard → SQL Editor"
-        MSG_DB_INIT_NOTE="Note: full_schema.sql is for new databases only, execute once"
+        MSG_DB_INIT_NOTE="Note: init-postgresql-db.sql is for new databases only, execute once"
         MSG_TITLE="📸 PIS - One-Click Deployment System"
         MSG_CONFIG_CREATED="Configuration file created:"
         MSG_USERNAME="Username:"
@@ -273,14 +273,14 @@ load_language() {
         MSG_BUILD_SOLUTIONS="Solutions:"
         MSG_BUILD_SOLUTION_1="  1. Check network: ping 8.8.8.8"
         MSG_BUILD_SOLUTION_2="  2. Check DNS: cat /etc/resolv.conf"
-        MSG_BUILD_SOLUTION_3="  3. Manual build: cd /opt/pis && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
+        MSG_BUILD_SOLUTION_3="  3. Manual build: cd \${DEPLOY_DIR} && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
         MSG_SKIP_BUILD="Skip Worker build and start other services only? [y/N]:"
         MSG_SKIP_BUILD_WARN="Skipping Worker build, will use build config in docker-compose.yml"
         MSG_BUILD_FAILED_EXIT="Worker build failed, cannot continue deployment"
         MSG_BUILD_LOG_SAVED="Build log saved to:"
         MSG_BUILD_MANUAL="Please try:"
         MSG_BUILD_MANUAL_1="  1. Check network connection and DNS configuration"
-        MSG_BUILD_MANUAL_2="  2. Manual build: cd /opt/pis && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
+        MSG_BUILD_MANUAL_2="  2. Manual build: cd \${DEPLOY_DIR} && docker build --network=host -f docker/worker.Dockerfile -t pis-worker:latest ."
         MSG_BUILD_MANUAL_3="  3. Or use pre-built image: docker pull junyuzhan/pis-worker:latest"
         MSG_UPDATED_COMPOSE="Updated docker-compose.yml to use pre-built image"
     fi
@@ -422,7 +422,7 @@ deploy_local() {
     echo "  1) ${MSG_DB_SUPABASE}"
     echo "     前端: Vercel | 数据库: Supabase | Worker/MinIO/Redis: 自托管"
     echo ""
-    echo "  2) ${MSG_DB_STANDALONE} ${GREEN}${MSG_DB_SUPABASE_REC}${NC}"
+    echo "  2) ${MSG_DB_STANDALONE} ${GREEN}${MSG_DB_STANDALONE_REC}${NC}"
     echo "     ${MSG_DB_STANDALONE_DESC}"
     echo ""
     

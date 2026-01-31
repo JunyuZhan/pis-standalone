@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { photoIdSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -16,45 +19,47 @@ interface RouteParams {
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
-    const { id: photoId } = await params
-    const supabase = await createClient()
+    const paramsData = await params
+    
+    // 验证路径参数
+    const idValidation = safeValidate(photoIdSchema, paramsData)
+    if (!idValidation.success) {
+      return handleError(idValidation.error, '无效的照片ID')
+    }
+    
+    const { id: photoId } = idValidation.data
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
     // 查询照片记录（获取 original_key 用于清理 MinIO 文件）
-    const adminClient = createAdminClient()
-    const { data: photo, error: fetchError } = await adminClient
+    const adminClient = await createAdminClient()
+    const photoResult = await adminClient
       .from('photos')
       .select('id, status, album_id, original_key')
       .eq('id', photoId)
       .single()
 
     // 如果记录不存在，可能已经被清理，返回成功
-    if (fetchError || !photo) {
-      return NextResponse.json({
+    if (photoResult.error || !photoResult.data) {
+      return createSuccessResponse({
         success: true,
         message: '照片记录不存在（可能已被清理）',
       })
     }
 
+    const photo = photoResult.data
+
     // 只允许删除pending或failed状态的照片（上传失败或处理失败的记录）
     // 注意：processing 状态的照片正在处理中，不应该被清理
     // 如果 processing 状态的照片卡住了，应该由 Worker 的恢复机制处理，而不是手动清理
     if (!['pending', 'failed'].includes(photo.status)) {
-      return NextResponse.json(
-        { error: { code: 'INVALID_STATUS', message: `只能清理pending或failed状态的照片，当前状态：${photo.status}。processing状态的照片正在处理中，请等待处理完成或由系统自动恢复。` } },
-        { status: 400 }
-      )
+      return ApiError.badRequest(`只能清理pending或failed状态的照片，当前状态：${photo.status}。processing状态的照片正在处理中，请等待处理完成或由系统自动恢复。`)
     }
 
     // 1. 清理 MinIO 中的原图文件（如果存在）
@@ -95,30 +100,17 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     }
 
     // 2. 删除数据库记录
-    const { error: deleteError } = await adminClient
-      .from('photos')
-      .delete()
-      .eq('id', photoId)
+    const deleteResult = await adminClient.delete('photos', { id: photoId })
 
-    if (deleteError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: deleteError.message } },
-        { status: 500 }
-      )
+    if (deleteResult.error) {
+      return handleError(deleteResult.error, '删除照片记录失败')
     }
 
-    console.log(`[Cleanup] Photo record deleted: ${photoId}, status was: ${photo.status}`)
-
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       message: '照片记录和文件已清理',
     })
   } catch (error) {
-    console.error('[Cleanup] API error:', error)
-    const errorMessage = error instanceof Error ? error.message : '服务器错误'
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: errorMessage } },
-      { status: 500 }
-    )
+    return handleError(error, '清理照片失败')
   }
 }

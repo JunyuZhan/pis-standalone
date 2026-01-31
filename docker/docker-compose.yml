@@ -1,14 +1,18 @@
 name: pis
 
 # ============================================
-# PIS 部署配置 - Vercel + Supabase 架构
+# PIS 部署配置 - 混合部署模式（Worker + 存储）
 # 
 # 架构说明:
-# - Web 前端: 部署在 Vercel（云端）
-# - 数据库: Supabase（云端）
+# - Web 前端: 部署在 Vercel（云端，可选）或使用 docker-compose.standalone.yml（推荐）
+# - 数据库: 外部 PostgreSQL（自托管，推荐）或 Supabase（向后兼容，混合部署模式）
 # - Worker: 图片处理服务（本服务器）
 # - MinIO: 对象存储（本服务器）
 # - Redis: 任务队列（本服务器）
+# 
+# 注意: 
+# - 推荐使用 docker-compose.standalone.yml 进行完全自托管部署（PostgreSQL）
+# - 此文件用于混合部署模式（Vercel + Supabase + 自建 Worker）
 # 
 # 环境变量配置:
 # - 统一使用根目录的 .env 文件

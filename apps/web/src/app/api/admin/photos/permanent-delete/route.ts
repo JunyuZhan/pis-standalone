@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/database'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 import { purgePhotoCache } from '@/lib/cloudflare-purge'
 import { revalidatePath } from 'next/cache'
+import { permanentDeleteSchema } from '@/lib/validation/schemas'
+import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
 
 /**
  * 永久删除照片（从回收站删除）
@@ -15,69 +18,45 @@ import { revalidatePath } from 'next/cache'
  */
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
+    const db = await createClient()
 
     // 验证登录状态
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const user = await getCurrentUser(request)
 
     if (!user) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: '请先登录' } },
-        { status: 401 }
-      )
+      return ApiError.unauthorized('请先登录')
     }
 
-    // 解析请求体
-    interface PermanentDeleteRequestBody {
-      photoIds: string[]
-    }
-
-    let body: PermanentDeleteRequestBody
+    // 解析和验证请求体
+    let body: unknown
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json(
-        { error: { code: 'INVALID_REQUEST', message: '请求体格式错误，请提供有效的JSON' } },
-        { status: 400 }
-      )
+      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
     }
 
-    const { photoIds } = body
-
-    if (!Array.isArray(photoIds) || photoIds.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '请选择要删除的照片' } },
-        { status: 400 }
-      )
+    // 验证输入
+    const validation = safeValidate(permanentDeleteSchema, body)
+    if (!validation.success) {
+      return handleError(validation.error, '输入验证失败')
     }
 
-    // 限制批量删除数量
-    if (photoIds.length > 100) {
-      return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: '单次最多删除100张照片' } },
-        { status: 400 }
-      )
-    }
+    const { photoIds } = validation.data
 
-    const adminClient = createAdminClient()
+    const adminClient = await createAdminClient()
 
     // 查询照片记录（获取文件路径和相册信息）
-    const { data: photosData, error: checkError } = await adminClient
+    const photosResult = await adminClient
       .from('photos')
       .select('id, album_id, original_key, thumb_key, preview_key')
       .in('id', photoIds)
       .not('deleted_at', 'is', null) // 只允许删除已在回收站的照片
 
-    if (checkError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: checkError.message } },
-        { status: 500 }
-      )
+    if (photosResult.error) {
+      return handleError(photosResult.error, '查询照片记录失败')
     }
 
-    const validPhotos = photosData as Array<{
+    const validPhotos = photosResult.data as Array<{
       id: string
       album_id: string
       original_key: string
@@ -86,23 +65,25 @@ export async function POST(request: NextRequest) {
     }> | null
 
     if (!validPhotos || validPhotos.length === 0) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: '未找到有效的照片（照片可能不在回收站中）' } },
-        { status: 404 }
-      )
+      return ApiError.notFound('未找到有效的照片（照片可能不在回收站中）')
     }
 
     const validPhotoIds = validPhotos.map((p) => p.id)
     const albumIds = [...new Set(validPhotos.map((p) => p.album_id))]
 
     // 获取相册信息（用于缓存清除）
-    const { data: albumsData } = await adminClient
+    const albumsResult = await adminClient
       .from('albums')
       .select('id, slug, cover_photo_id')
       .in('id', albumIds)
 
-    const albumsMap = new Map(
-      (albumsData || []).map((album) => [album.id, album])
+    interface AlbumInfo {
+      id: string
+      slug: string | null
+      cover_photo_id: string | null
+    }
+    const albumsMap = new Map<string, AlbumInfo>(
+      ((albumsResult.data || []) as AlbumInfo[]).map((album) => [album.id, album])
     )
 
     // 1. 删除 MinIO 文件（通过 Worker API）
@@ -184,41 +165,34 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. 删除数据库记录
-    const { error: deleteError } = await adminClient
-      .from('photos')
-      .delete()
-      .in('id', validPhotoIds)
+    // 批量删除：为每个照片ID执行删除操作
+    const deletePromises = validPhotoIds.map((id) => adminClient.delete('photos', { id }))
+    const deleteResults = await Promise.all(deletePromises)
+    const deleteError = deleteResults.find((r) => r.error)?.error
 
     if (deleteError) {
-      return NextResponse.json(
-        { error: { code: 'DB_ERROR', message: deleteError.message } },
-        { status: 500 }
-      )
+      return handleError(deleteError, '删除照片记录失败')
     }
 
     // 4. 更新相册封面（如果封面照片被删除）
     for (const album of albumsMap.values()) {
       if (album.cover_photo_id && validPhotoIds.includes(album.cover_photo_id)) {
-        await adminClient
-          .from('albums')
-          .update({ cover_photo_id: null })
-          .eq('id', album.id)
+        await adminClient.update('albums', { cover_photo_id: null }, { id: album.id })
       }
     }
 
     // 5. 更新相册照片计数
     for (const albumId of albumIds) {
-      const { count: actualPhotoCount } = await adminClient
+      const countResult = await adminClient
         .from('photos')
-        .select('*', { count: 'exact', head: true })
+        .select('*')
         .eq('album_id', albumId)
         .eq('status', 'completed')
         .is('deleted_at', null)
 
-      await adminClient
-        .from('albums')
-        .update({ photo_count: actualPhotoCount ?? 0 })
-        .eq('id', albumId)
+      const actualPhotoCount = countResult.count || countResult.data?.length || 0
+
+      await adminClient.update('albums', { photo_count: actualPhotoCount }, { id: albumId })
     }
 
     // 6. 清除 Next.js/Vercel 路由缓存
@@ -238,17 +212,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       success: true,
       deletedCount: validPhotoIds.length,
       message: `已永久删除 ${validPhotoIds.length} 张照片`,
     })
   } catch (error) {
-    console.error('[Permanent Delete] API error:', error)
-    const errorMessage = error instanceof Error ? error.message : '服务器错误'
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: errorMessage } },
-      { status: 500 }
-    )
+    return handleError(error, '永久删除照片失败')
   }
 }

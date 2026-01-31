@@ -6,7 +6,7 @@
  */
 
 import type { Metadata, Viewport } from 'next'
-import { Inter, Noto_Serif_SC, Playfair_Display } from 'next/font/google'
+import localFont from 'next/font/local'
 import { NextIntlClientProvider } from 'next-intl'
 import { getLocale, getMessages } from 'next-intl/server'
 import './globals.css'
@@ -15,28 +15,76 @@ import { PWAInstallPrompt } from '@/components/pwa-install-prompt'
 import { ServiceWorkerRegistration } from '@/components/service-worker-registration'
 import { SiteFooter } from '@/components/site-footer'
 
-// 优化字体加载 - 使用 next/font 自动优化
-const inter = Inter({ 
-  subsets: ['latin'],
-  display: 'swap',
-  preload: true,
+// 使用本地字体文件（避免 Google Fonts 网络依赖）
+// 字体文件应放在 apps/web/src/app/fonts/ 目录下（Next.js localFont 要求相对于源文件）
+// 或者放在 apps/web/public/fonts/ 目录下，使用系统字体回退
+const inter = localFont({
+  src: [
+    {
+      path: './fonts/Inter-Regular.woff2',
+      weight: '400',
+      style: 'normal',
+    },
+    {
+      path: './fonts/Inter-SemiBold.woff2',
+      weight: '600',
+      style: 'normal',
+    },
+    {
+      path: './fonts/Inter-Bold.woff2',
+      weight: '700',
+      style: 'normal',
+    },
+  ],
   variable: '--font-inter',
+  display: 'swap',
+  fallback: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
 })
 
-const notoSerifSC = Noto_Serif_SC({ 
-  subsets: ['latin'],
-  weight: ['400', '600', '700'],
-  display: 'swap',
-  preload: false, // 按需加载
+const notoSerifSC = localFont({
+  src: [
+    {
+      path: './fonts/NotoSerifSC-Regular.woff2',
+      weight: '400',
+      style: 'normal',
+    },
+    {
+      path: './fonts/NotoSerifSC-SemiBold.woff2',
+      weight: '600',
+      style: 'normal',
+    },
+    {
+      path: './fonts/NotoSerifSC-Bold.woff2',
+      weight: '700',
+      style: 'normal',
+    },
+  ],
   variable: '--font-noto-serif-sc',
+  display: 'swap',
+  fallback: ['PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'serif'],
 })
 
-const playfairDisplay = Playfair_Display({ 
-  subsets: ['latin'],
-  weight: ['400', '600', '700'],
-  display: 'swap',
-  preload: false, // 按需加载
+const playfairDisplay = localFont({
+  src: [
+    {
+      path: './fonts/PlayfairDisplay-Regular.woff2',
+      weight: '400',
+      style: 'normal',
+    },
+    {
+      path: './fonts/PlayfairDisplay-SemiBold.woff2',
+      weight: '600',
+      style: 'normal',
+    },
+    {
+      path: './fonts/PlayfairDisplay-Bold.woff2',
+      weight: '700',
+      style: 'normal',
+    },
+  ],
   variable: '--font-playfair-display',
+  display: 'swap',
+  fallback: ['Georgia', 'Times New Roman', 'serif'],
 })
 
 // Metadata will be generated dynamically based on locale
@@ -106,9 +154,7 @@ export default async function RootLayout({
             <link rel="preconnect" href={mediaHost} crossOrigin="anonymous" />
           </>
         )}
-        {/* 预连接 Google Fonts（next/font 会自动处理，但添加以优化） */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* 本地字体，无需预连接 Google Fonts */}
         
         {/* PWA Apple 特定 meta */}
         <meta name="apple-mobile-web-app-capable" content="yes" />

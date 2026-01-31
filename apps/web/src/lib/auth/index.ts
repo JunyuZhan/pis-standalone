@@ -274,6 +274,7 @@ export interface AuthDatabase {
   findUserByEmail(email: string): Promise<{ id: string; email: string; password_hash: string } | null>
   createUser(email: string, passwordHash: string): Promise<{ id: string; email: string }>
   updateUserPassword(userId: string, passwordHash: string): Promise<void>
+  updateLastLogin?(userId: string): Promise<void>
 }
 
 let authDatabase: AuthDatabase | null = null
