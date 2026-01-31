@@ -116,9 +116,26 @@ class PostgresQueryBuilder<T = unknown> {
       } else if (key.endsWith('[]')) {
         conditions.push(`${escapedKey} = ANY($${paramIndex++})`)
         values.push(value as QueryParameterValue)
+      } else if (key.startsWith('!') && key.endsWith('?')) {
+        // NOT IS 操作符：null 值使用 IS NOT NULL，非 null 值使用 != 操作符
+        const columnName = key.slice(1, -1) // 移除开头的 ! 和结尾的 ?
+        const escapedColumn = this.escapeIdentifier(columnName)
+        if (value === null) {
+          conditions.push(`${escapedColumn} IS NOT NULL`)
+          // 不添加参数，因为 IS NOT NULL 不需要参数
+        } else {
+          conditions.push(`${escapedColumn} != $${paramIndex++}`)
+          values.push(value as QueryParameterValue)
+        }
       } else if (key.endsWith('?')) {
-        conditions.push(`${escapedKey} IS $${paramIndex++}`)
-        values.push(value as QueryParameterValue)
+        // IS 操作符：null 值使用 IS NULL，非 null 值使用 = 操作符
+        if (value === null) {
+          conditions.push(`${escapedKey} IS NULL`)
+          // 不添加参数，因为 IS NULL 不需要参数
+        } else {
+          conditions.push(`${escapedKey} = $${paramIndex++}`)
+          values.push(value as QueryParameterValue)
+        }
       } else if (key.startsWith('!')) {
         conditions.push(`${escapedKey} != $${paramIndex++}`)
         values.push(value as QueryParameterValue)
