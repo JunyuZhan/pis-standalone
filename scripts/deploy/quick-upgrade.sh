@@ -1,18 +1,19 @@
 #!/bin/bash
 # ============================================
-# PIS 快速升级脚本（不管理服务器容器）
+# PIS 快速升级脚本
 # ============================================
 # 
 # 特性：
 #   - 快速升级，更新代码和配置
-#   - 不启动/停止服务器上的容器
-#   - 保留现有配置
+#   - 自动重启 Docker 容器以应用更改
+#   - 保留现有配置和数据
 #   - 支持强制更新
 #
 # 使用方法：
 #   cd /opt/pis-standalone
 #   bash scripts/deploy/quick-upgrade.sh
 #   bash scripts/deploy/quick-upgrade.sh --force
+#   bash scripts/deploy/quick-upgrade.sh --no-restart  # 不重启容器
 # ============================================
 
 set -e
@@ -29,6 +30,8 @@ NC='\033[0m'
 # 全局变量
 FORCE_UPDATE=false
 REGENERATE_SECRETS=false
+RESTART_CONTAINERS=true
+COMPOSE_CMD=""
 
 # 检测项目根目录
 detect_project_root() {
@@ -132,6 +135,10 @@ for arg in "$@"; do
     case $arg in
         --force)
             FORCE_UPDATE=true
+            shift
+            ;;
+        --no-restart)
+            RESTART_CONTAINERS=false
             shift
             ;;
         *)
@@ -320,35 +327,128 @@ update_config_files() {
     fi
 }
 
+# 检查 Docker 环境
+check_docker() {
+    info "检查 Docker 环境..."
+    
+    # 检查 Docker
+    if ! command -v docker &> /dev/null; then
+        warn "Docker 未安装，跳过容器重启"
+        return 1
+    fi
+    
+    if ! docker info &> /dev/null; then
+        warn "Docker 未运行或无权限，跳过容器重启"
+        return 1
+    fi
+    
+    # 检查 Docker Compose
+    if docker compose version &> /dev/null; then
+        COMPOSE_CMD="docker compose"
+        success "Docker Compose 已安装（compose 插件）"
+    elif command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+        success "Docker Compose 已安装（standalone）"
+    else
+        warn "Docker Compose 未安装，跳过容器重启"
+        return 1
+    fi
+    
+    return 0
+}
+
+# 重启容器
+restart_containers() {
+    if [ "$RESTART_CONTAINERS" != true ]; then
+        return 0
+    fi
+    
+    if ! check_docker; then
+        return 0
+    fi
+    
+    local docker_dir="${PROJECT_ROOT}/docker"
+    
+    if [ ! -d "$docker_dir" ]; then
+        warn "未找到 docker 目录: $docker_dir"
+        return 0
+    fi
+    
+    cd "$docker_dir"
+    
+    # 检查 docker-compose 文件
+    local compose_file="docker-compose.standalone.yml"
+    if [ ! -f "$compose_file" ]; then
+        warn "未找到 $compose_file，尝试使用 docker-compose.yml"
+        compose_file="docker-compose.yml"
+        if [ ! -f "$compose_file" ]; then
+            warn "未找到 docker-compose 配置文件，跳过容器重启"
+            return 0
+        fi
+    fi
+    
+    info "使用配置文件: $compose_file"
+    
+    # 重新构建并重启容器
+    info "重新构建并重启容器..."
+    if $COMPOSE_CMD -f "$compose_file" up -d --build; then
+        success "容器重启成功"
+        
+        # 等待服务启动
+        info "等待服务启动..."
+        sleep 10
+        
+        # 检查服务状态
+        info "检查服务状态..."
+        $COMPOSE_CMD -f "$compose_file" ps
+        
+        return 0
+    else
+        warn "容器重启失败，请手动检查"
+        return 1
+    fi
+}
+
 # 显示升级信息
 show_upgrade_info() {
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}  升级准备完成！${NC}"
+    echo -e "${GREEN}  升级完成！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
-    echo -e "${BLUE}下一步操作（在服务器上执行）：${NC}"
-    echo ""
-    echo -e "  1. ${CYAN}拉取最新代码${NC}"
-    echo -e "     cd /opt/pis-standalone"
-    echo -e "     git pull origin main"
-    echo ""
-    echo -e "  2. ${CYAN}重新构建并启动容器${NC}"
-    echo -e "     cd /opt/pis-standalone/docker"
-    echo -e "     docker compose down"
-    echo -e "     docker compose up -d --build"
-    echo ""
-    echo -e "  3. ${CYAN}查看服务状态${NC}"
-    echo -e "     cd /opt/pis-standalone/docker"
-    echo -e "     docker compose ps"
-    echo ""
-    echo -e "  4. ${CYAN}查看服务日志${NC}"
-    echo -e "     cd /opt/pis-standalone/docker"
-    echo -e "     docker compose logs -f"
-    echo ""
+    
+    if [ "$RESTART_CONTAINERS" = true ]; then
+        echo -e "${BLUE}服务已自动重启${NC}"
+        echo ""
+        echo -e "${BLUE}常用命令：${NC}"
+        echo ""
+        local compose_cmd="${COMPOSE_CMD:-docker compose}"
+        echo -e "  查看服务状态:"
+        echo -e "     cd ${PROJECT_ROOT}/docker && $compose_cmd ps"
+        echo ""
+        echo -e "  查看服务日志:"
+        echo -e "     cd ${PROJECT_ROOT}/docker && $compose_cmd logs -f"
+        echo ""
+        echo -e "  重启服务:"
+        echo -e "     cd ${PROJECT_ROOT}/docker && $compose_cmd restart"
+        echo ""
+        echo -e "  停止服务:"
+        echo -e "     cd ${PROJECT_ROOT}/docker && $compose_cmd down"
+        echo ""
+    else
+        echo -e "${BLUE}下一步操作：${NC}"
+        echo ""
+        echo -e "  1. ${CYAN}重新构建并启动容器${NC}"
+        echo -e "     cd ${PROJECT_ROOT}/docker"
+        echo -e "     docker compose -f docker-compose.standalone.yml up -d --build"
+        echo ""
+        echo -e "  2. ${CYAN}查看服务状态${NC}"
+        echo -e "     cd ${PROJECT_ROOT}/docker"
+        echo -e "     docker compose ps"
+        echo ""
+    fi
+    
     echo -e "${YELLOW}⚠ 注意事项：${NC}"
-    echo -e "   - 本脚本不管理服务器上的容器"
-    echo -e "   - 服务器上的容器需要手动启动"
     echo -e "   - 配置文件会被保留（.env）"
     echo -e "   - 数据卷会被保留"
     echo ""
@@ -361,6 +461,7 @@ main() {
     check_git_status
     pull_latest_code
     update_config_files
+    restart_containers
     show_upgrade_info
 }
 

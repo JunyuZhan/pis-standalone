@@ -269,6 +269,10 @@ services:
       - ENABLE_PRETTY_LOG=${ENABLE_PRETTY_LOG:-false}
     volumes:
       - pis_web_logs:/app/logs
+      # 挂载项目根目录（只读），用于升级脚本访问
+      # 注意：在生产环境，项目根目录通常在 /opt/pis-standalone
+      # 如果 PROJECT_ROOT 环境变量未设置，使用相对路径 ../..（从 docker 目录向上两级）
+      - ${PROJECT_ROOT:-../..}:/opt/pis-standalone:ro
     ports:
       # 唯一对外暴露端口，所有服务通过路径访问
       # 如需修改端口避免冲突，请同时更新环境变量 NEXT_PUBLIC_APP_URL
