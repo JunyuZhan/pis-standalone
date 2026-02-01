@@ -57,8 +57,9 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - pis_postgres_data:/var/lib/postgresql/data
-      # 数据库初始化脚本（如果需要）
+      # 数据库初始化脚本（按执行顺序）
       - ./init-postgresql-db.sql:/docker-entrypoint-initdb.d/init-postgresql-db.sql:ro
+      - ./init-postgresql.sh:/docker-entrypoint-initdb.d/init-postgresql.sh:ro
     # 不暴露端口，仅容器内访问（通过 Next.js Web 容器路径访问）
     restart: unless-stopped
     networks:

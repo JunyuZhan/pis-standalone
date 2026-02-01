@@ -278,6 +278,7 @@ CREATE TRIGGER update_package_downloads_updated_at
 -- ============================================
 -- 初始化完成提示
 -- ============================================
+-- 注意：默认管理员账户由 init-postgresql.sh 脚本创建
 DO $$
 BEGIN
     RAISE NOTICE '✅ PIS 数据库初始化完成！';
