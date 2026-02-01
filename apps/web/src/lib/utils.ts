@@ -106,8 +106,9 @@ export function getAppBaseUrl(): string {
  * 获取内部 API URL（用于服务端内部调用）
  *
  * @description 
- * - 服务端内部调用应使用相对路径，Next.js 会自动处理
- * - 如果需要绝对 URL（如某些特殊场景），使用环境变量或默认值
+ * - 服务端内部调用需要使用绝对 URL（因为服务端 fetch 不支持相对路径）
+ * - 在容器内部，应该使用 localhost（因为服务端和 API 路由在同一个容器中）
+ * - 客户端可以使用相对路径
  * @param {string} path - API 路径（如 '/api/worker/process'）
  * @returns {string} 完整的 API URL
  */
@@ -115,16 +116,20 @@ export function getInternalApiUrl(path: string): string {
   // 确保路径以 / 开头
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
   
-  // 服务端：优先使用相对路径（Next.js 会自动处理）
-  // 如果需要绝对 URL，可以使用环境变量
+  // 服务端：必须使用绝对 URL（服务端 fetch 不支持相对路径）
   if (typeof window === 'undefined') {
-    // 如果设置了内部 API URL 环境变量，使用它
-    const internalApiUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_APP_URL
+    // 优先使用 INTERNAL_API_URL（容器内部 URL，如 http://localhost:3000）
+    // 如果没有设置，使用 localhost（因为服务端和 API 路由在同一个容器中）
+    const internalApiUrl = process.env.INTERNAL_API_URL
     if (internalApiUrl) {
       return `${internalApiUrl.replace(/\/$/, '')}${normalizedPath}`
     }
-    // 否则使用相对路径（推荐）
-    return normalizedPath
+    
+    // 默认使用 localhost（容器内部调用）
+    // 注意：不要使用 NEXT_PUBLIC_APP_URL，因为那是公网 URL，服务端内部调用应该使用容器内部地址
+    const port = process.env.PORT || '3000'
+    const defaultUrl = `http://localhost:${port}`
+    return `${defaultUrl}${normalizedPath}`
   }
   
   // 客户端：使用相对路径
