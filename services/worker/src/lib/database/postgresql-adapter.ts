@@ -340,28 +340,15 @@ export class PostgreSQLAdapter implements DatabaseAdapter {
       }
 
       const escapedTable = this.escapeIdentifier(table);
-      // 构建 WHERE 子句，参数索引从 paramIndex 开始
-      const whereConditions: string[] = [];
-      const whereValues: any[] = [];
-
-      for (const [key, value] of Object.entries(filters)) {
-        const escapedKey = this.escapeIdentifier(key);
-        if (value === null) {
-          whereConditions.push(`${escapedKey} IS NULL`);
-        } else if (Array.isArray(value)) {
-          const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
-          whereConditions.push(`${escapedKey} IN (${placeholders})`);
-          whereValues.push(...value);
-        } else {
-          whereConditions.push(`${escapedKey} = $${paramIndex++}`);
-          whereValues.push(value);
-        }
-      }
-
-      const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+      // 使用 buildWhereClause 方法正确处理特殊格式的 filters（如 column?, column>, 等）
+      const { clause: whereClause, values: whereValues } = this.buildWhereClause(filters);
+      // 调整 WHERE 子句中的参数索引，使其从 SET 子句之后开始
+      const adjustedWhereClause = whereClause.replace(/\$(\d+)/g, (_, num) => {
+        return `$${parseInt(num, 10) + paramIndex - 1}`;
+      });
       const setClause = setClauses.join(', ');
 
-      const query = `UPDATE ${escapedTable} SET ${setClause} ${whereClause} RETURNING *`;
+      const query = `UPDATE ${escapedTable} SET ${setClause} ${adjustedWhereClause} RETURNING *`;
       const allValues = [...values, ...whereValues];
 
       const result = await this.pool.query(query, allValues);
