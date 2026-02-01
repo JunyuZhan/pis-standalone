@@ -43,6 +43,10 @@ export function OptimizedImage({
   aspectRatio,
   unoptimized = false, // 默认使用 Next.js 优化；CDN 已优化的图片可设为 true
 }: OptimizedImageProps) {
+  // 自动检测 localhost 环境，如果是 localhost 则跳过 Next.js 优化，避免 Docker 容器内部回环访问失败
+  const isLocalhost = typeof src === 'string' && (src.includes('localhost') || src.includes('127.0.0.1'));
+  const effectiveUnoptimized = unoptimized || isLocalhost;
+
   const [imageError, setImageError] = useState(false)
   const [diagnosticInfo, setDiagnosticInfo] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
@@ -126,7 +130,7 @@ export function OptimizedImage({
       // ERR_HTTP2_PROTOCOL_ERROR 通常表现为：状态码 200 但图片无法加载（naturalWidth/Height 为 0）
       // 当使用 Next.js Image 组件且 unoptimized=true 时，如果出现这种情况，可能是 HTTP/2 协议问题
       let http2Error = false
-      if (event?.target && unoptimized) {
+      if (event?.target && effectiveUnoptimized) {
         const img = event.target as HTMLImageElement
         // 检查是否是 HTTP/2 协议错误：图片标记为完成但尺寸为 0，且有有效的 src
         if (img.naturalWidth === 0 && img.naturalHeight === 0 && img.complete && img.currentSrc) {
@@ -185,7 +189,7 @@ export function OptimizedImage({
       errorDetails += `  src type: ${typeof src}, value: ${JSON.stringify(src)}\n`
       errorDetails += `  alt type: ${typeof alt}, value: ${JSON.stringify(alt)}\n`
       errorDetails += `  hasSrc: ${!!src}, srcLength: ${typeof src === 'string' ? src.length : 'N/A'}\n`
-      errorDetails += `  props: width=${width ?? 'undefined'}, height=${height ?? 'undefined'}, fill=${fill}, unoptimized=${unoptimized}`
+      errorDetails += `  props: width=${width ?? 'undefined'}, height=${height ?? 'undefined'}, fill=${fill}, unoptimized=${effectiveUnoptimized}`
       if (protocolMismatch) {
         errorDetails += protocolMismatch
       }
@@ -220,31 +224,16 @@ export function OptimizedImage({
       // 使用单个 console.error 调用，包含所有信息
       console.error(errorDetails)
       
-      // 同时使用 console.group 提供更好的可读性（如果浏览器支持）
-      if (console.group) {
-        console.group('[OptimizedImage] Image load failed - Details')
-        console.log('src:', src)
-        console.log('alt:', alt)
-        console.log('props:', { width, height, fill, unoptimized })
-        if (diagnosticInfo) {
-          console.log('Diagnostic:', diagnosticInfo)
+      // 诊断信息（仅在开发环境或需要时）
+      if (protocolMismatch) {
+        console.warn('Protocol mismatch:', protocolMismatch)
+      }
+      if (event?.target) {
+        const img = event.target as HTMLImageElement
+        if (src && img.currentSrc && src !== img.currentSrc) {
+          console.warn('URL changed:', { original: src, current: img.currentSrc })
+          console.warn('💡 This suggests a protocol redirect (HTTP -> HTTPS) or URL rewrite')
         }
-        if (protocolMismatch) {
-          console.warn('Protocol mismatch:', protocolMismatch)
-        }
-        if (event?.target) {
-          const img = event.target as HTMLImageElement
-          console.log('image element:', {
-            currentSrc: img.currentSrc,
-            naturalWidth: img.naturalWidth,
-            naturalHeight: img.naturalHeight,
-          })
-          if (src && img.currentSrc && src !== img.currentSrc) {
-            console.warn('URL changed:', { original: src, current: img.currentSrc })
-            console.warn('💡 This suggests a protocol redirect (HTTP -> HTTPS) or URL rewrite')
-          }
-        }
-        console.groupEnd()
       }
     } catch (logError) {
       // 如果日志记录本身出错，至少记录基本信息
@@ -301,7 +290,7 @@ export function OptimizedImage({
           placeholder={blurDataURL ? 'blur' : 'empty'}
           blurDataURL={blurDataURL}
           onError={handleError}
-          unoptimized={unoptimized}
+          unoptimized={effectiveUnoptimized}
         />
       </div>
     )

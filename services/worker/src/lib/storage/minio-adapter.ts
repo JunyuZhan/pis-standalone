@@ -45,7 +45,6 @@ export class MinIOAdapter implements StorageAdapter {
     // 始终使用内部 MinIO 客户端生成签名，然后替换 URL 中的主机部分
     // 这样可以避免连接公开 URL 的问题（公开 URL 可能是 Nginx 反向代理）
     this.presignClient = this.client;
-    console.log(`[MinIO] Using internal client for presigned URLs. Public URL: ${this.publicUrl || 'not configured'}`);
 
     // AWS S3 客户端用于分片上传（MinIO 兼容 S3）
     const s3Endpoint = this.useSSL 
@@ -61,6 +60,22 @@ export class MinIOAdapter implements StorageAdapter {
       },
       forcePathStyle: true, // MinIO 需要路径样式
     });
+  }
+
+  /**
+   * 确保 bucket 存在，如果不存在则创建
+   */
+  async ensureBucket(): Promise<void> {
+    try {
+      const exists = await this.client.bucketExists(this.bucket);
+      if (!exists) {
+        await this.client.makeBucket(this.bucket, this.region || 'us-east-1');
+      }
+    } catch (err: any) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error(`[MinIO] Error ensuring bucket ${this.bucket}:`, errorMessage);
+      throw new Error(`Failed to ensure bucket: ${errorMessage}`);
+    }
   }
 
   async download(key: string): Promise<Buffer> {
@@ -135,7 +150,6 @@ export class MinIOAdapter implements StorageAdapter {
         throw new Error('Failed to get upload ID from MinIO');
       }
       
-      console.log(`[MinIO] Initiated multipart upload for ${key}, uploadId: ${response.UploadId}`);
       return response.UploadId;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -224,8 +238,14 @@ export class MinIOAdapter implements StorageAdapter {
         },
       });
       
-      await this.s3Client.send(command);
-      console.log(`[MinIO] Completed multipart upload for ${key}`);
+      const result = await this.s3Client.send(command);
+      
+      // 验证文件是否真的存在（等待1秒后检查，因为 MinIO 可能有最终一致性）
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const fileExists = await this.exists(key);
+      if (!fileExists) {
+        console.warn(`[MinIO] ⚠️  Warning: File ${key} does not exist after completeMultipartUpload!`);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[MinIO] Error completing multipart upload for ${key}:`, errorMessage);
@@ -242,7 +262,6 @@ export class MinIOAdapter implements StorageAdapter {
       });
       
       await this.s3Client.send(command);
-      console.log(`[MinIO] Aborted multipart upload for ${key}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[MinIO] Error aborting multipart upload for ${key}:`, errorMessage);
@@ -292,7 +311,6 @@ export class MinIOAdapter implements StorageAdapter {
         destKey,
         source
       );
-      console.log(`[MinIO] Copied ${srcKey} -> ${destKey}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[MinIO] Error copying ${srcKey} to ${destKey}:`, errorMessage);
@@ -312,15 +330,22 @@ export class MinIOAdapter implements StorageAdapter {
       urlObj.hostname = publicUrlObj.hostname;
       urlObj.port = publicUrlObj.port || '';
       
-      // 替换路径中的 bucket 名称为 publicUrl 的路径
-      // 例如: /pis-photos/raw/... -> /media/raw/...
+      // 如果 publicUrl 有路径（例如 /media），则替换 bucket 路径
+      // 如果 publicUrl 没有路径（直接指向 MinIO），则保留 bucket 路径
       const bucketPath = `/${this.bucket}/`;
       const publicPath = publicUrlObj.pathname.endsWith('/') 
         ? publicUrlObj.pathname 
-        : `${publicUrlObj.pathname}/`;
+        : publicUrlObj.pathname 
+          ? `${publicUrlObj.pathname}/`
+          : '/';
       
       if (urlObj.pathname.startsWith(bucketPath)) {
-        urlObj.pathname = urlObj.pathname.replace(bucketPath, publicPath);
+        // 如果 publicUrl 有自定义路径（如 /media），替换 bucket 路径
+        if (publicPath !== '/') {
+          urlObj.pathname = urlObj.pathname.replace(bucketPath, publicPath);
+        }
+        // 如果 publicUrl 没有路径（直接指向 MinIO），保留 bucket 路径（不做替换）
+        // 这样 presigned URL 会保持 /pis-photos/raw/... 格式
       }
       
       return urlObj.toString();

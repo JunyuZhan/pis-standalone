@@ -1,17 +1,57 @@
 /**
- * PostgreSQL 客户端
- * 
+ * PIS Web - PostgreSQL 客户端
+ *
  * 提供与 Supabase Client 类似的 API 接口，用于 PostgreSQL 自托管模式
  * 适配 Next.js Server Components 和 API Routes
+ *
+ * @author PIS Contributors
+ * @license MIT
+ *
+ * @description
+ * 核心功能：
+ * - 连接池管理（单例模式）
+ * - 链式查询构建器（模拟 Supabase API）
+ * - CRUD 操作（insert, update, delete, select）
+ * - RPC 函数调用
+ *
+ * @example
+ * ```typescript
+ * import { createPostgreSQLClient } from '@/lib/database/postgresql-client'
+ *
+ * const db = createPostgreSQLClient()
+ *
+ * // 查询
+ * const { data } = await db.from('albums').select('*').eq('id', '123').single()
+ *
+ * // 插入
+ * const { data: newAlbum } = await db.insert('albums', { title: 'My Album' })
+ *
+ * // 更新
+ * const { data: updated } = await db.update('albums', { title: 'New Title' }, { id: '123' })
+ *
+ * // 删除
+ * const { data: deleted } = await db.delete('albums', { id: '123' })
+ * ```
  */
 import { Pool } from 'pg'
 import type { DatabaseFilters, DatabaseValue, QueryParameterValue, RpcParams } from './types'
 
-// 全局连接池（单例模式）
+/** 全局连接池（单例模式） */
 let pool: Pool | null = null
 
 /**
  * 获取 PostgreSQL 连接池
+ *
+ * @description
+ * - 首次调用时创建连接池
+ * - 支持从 DATABASE_URL 或独立环境变量构建连接字符串
+ * - 最大连接数：20
+ * - 空闲超时：30秒
+ * - 连接超时：2秒
+ *
+ * @returns PostgreSQL 连接池实例
+ *
+ * @internal
  */
 function getPool(): Pool {
   if (!pool) {
@@ -60,7 +100,14 @@ function getPool(): Pool {
 }
 
 /**
- * PostgreSQL 查询构建器（模拟 Supabase 查询构建器）
+ * PostgreSQL 查询构建器
+ *
+ * @description
+ * 模拟 Supabase 查询构建器 API，支持链式调用
+ *
+ * @template T - 返回数据类型
+ *
+ * @internal
  */
 class PostgresQueryBuilder<T = unknown> {
   private pool: Pool
@@ -93,7 +140,8 @@ class PostgresQueryBuilder<T = unknown> {
     let paramIndex = 1
 
     for (const [key, value] of Object.entries(this.filters)) {
-      const escapedKey = this.escapeIdentifier(key.replace(/[!><=~?\[\]]+$/, ''))
+      // 移除开头的 ! (用于 neq/not) 和结尾的操作符
+      const escapedKey = this.escapeIdentifier(key.replace(/^!/, '').replace(/[!><=~?\[\]]+$/, ''))
       
       if (key.endsWith('>')) {
         conditions.push(`${escapedKey} > $${paramIndex++}`)
@@ -394,6 +442,12 @@ class PostgresQueryBuilder<T = unknown> {
 
 /**
  * PostgreSQL 客户端（模拟 Supabase Client API）
+ *
+ * @description
+ * 提供与 Supabase Client 兼容的接口，支持：
+ * - 链式查询（from、select、where、order 等）
+ * - CRUD 操作（insert、update、delete）
+ * - RPC 函数调用
  */
 export class PostgreSQLClient {
   private pool: Pool
@@ -405,14 +459,32 @@ export class PostgreSQLClient {
   }
 
   /**
-   * 查询构建器（模拟 Supabase 的 from 方法）
+   * 创建查询构建器
+   *
+   * @param table - 表名
+   * @returns 查询构建器实例
+   *
+   * @example
+   * ```typescript
+   * const query = db.from('albums')
+   * const { data } = await query.select('*').eq('is_public', true)
+   * ```
    */
   from<T = unknown>(table: string): PostgresQueryBuilder<T> {
     return new PostgresQueryBuilder<T>(this.pool, table)
   }
 
   /**
-   * 调用数据库函数 (RPC)
+   * 调用数据库函数（RPC）
+   *
+   * @param functionName - 函数名
+   * @param params - 函数参数（可选）
+   * @returns 函数执行结果
+   *
+   * @example
+   * ```typescript
+   * const { data } = await db.rpc('increment_photo_count', { album_id: '123' })
+   * ```
    */
   async rpc(functionName: string, params?: RpcParams): Promise<{ data: unknown; error: Error | null }> {
     try {
@@ -439,6 +511,22 @@ export class PostgreSQLClient {
 
   /**
    * 插入数据
+   *
+   * @param table - 表名
+   * @param data - 要插入的数据（单条或数组）
+   * @returns 插入结果
+   *
+   * @example
+   * ```typescript
+   * // 插入单条记录
+   * const { data } = await db.insert('albums', { title: 'My Album', slug: 'my-album' })
+   *
+   * // 批量插入
+   * const { data } = await db.insert('albums', [
+   *   { title: 'Album 1', slug: 'album-1' },
+   *   { title: 'Album 2', slug: 'album-2' }
+   * ])
+   * ```
    */
   async insert<T = unknown>(table: string, data: T | T[]): Promise<{ data: T[] | null; error: Error | null }> {
     try {
@@ -483,6 +571,20 @@ export class PostgreSQLClient {
 
   /**
    * 更新数据
+   *
+   * @param table - 表名
+   * @param data - 要更新的字段
+   * @param filters - 过滤条件（WHERE 子句）
+   * @returns 更新结果
+   *
+   * @example
+   * ```typescript
+   * const { data } = await db.update(
+   *   'albums',
+   *   { title: 'New Title' },
+   *   { id: '123' }
+   * )
+   * ```
    */
   async update<T = unknown>(table: string, data: Partial<T>, filters: DatabaseFilters): Promise<{ data: T[] | null; error: Error | null }> {
     try {
@@ -521,6 +623,15 @@ export class PostgreSQLClient {
 
   /**
    * 删除数据
+   *
+   * @param table - 表名
+   * @param filters - 过滤条件（WHERE 子句）
+   * @returns 删除结果
+   *
+   * @example
+   * ```typescript
+   * const { data } = await db.delete('albums', { id: '123' })
+   * ```
    */
   async delete(table: string, filters: DatabaseFilters): Promise<{ data: unknown[] | null; error: Error | null }> {
     try {
@@ -551,7 +662,10 @@ export class PostgreSQLClient {
   }
 
   /**
-   * 关闭连接
+   * 关闭数据库连接
+   *
+   * @description
+   * 关闭连接池，释放所有连接
    */
   async close(): Promise<void> {
     await this.pool.end()
@@ -560,6 +674,16 @@ export class PostgreSQLClient {
 
 /**
  * 创建 PostgreSQL 客户端（用于 Server Components）
+ *
+ * @returns PostgreSQL 客户端实例
+ *
+ * @example
+ * ```typescript
+ * import { createPostgreSQLClient } from '@/lib/database/postgresql-client'
+ *
+ * const db = createPostgreSQLClient()
+ * const { data } = await db.from('albums').select('*')
+ * ```
  */
 export function createPostgreSQLClient(): PostgreSQLClient {
   const pool = getPool()
@@ -568,6 +692,19 @@ export function createPostgreSQLClient(): PostgreSQLClient {
 
 /**
  * 创建 PostgreSQL Admin 客户端（绕过权限检查）
+ *
+ * @description
+ * Admin 客户端具有额外权限，可以绕过 RLS 策略
+ *
+ * @returns PostgreSQL Admin 客户端实例
+ *
+ * @example
+ * ```typescript
+ * import { createPostgreSQLAdminClient } from '@/lib/database/postgresql-client'
+ *
+ * const db = createPostgreSQLAdminClient()
+ * const { data } = await db.from('users').select('*')
+ * ```
  */
 export function createPostgreSQLAdminClient(): PostgreSQLClient {
   const pool = getPool()

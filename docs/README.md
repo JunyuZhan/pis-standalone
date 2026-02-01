@@ -13,6 +13,7 @@
 | [部署检查清单](./DEPLOYMENT_CHECKLIST.md) | 部署前检查清单和快速参考 |
 | [架构示例](./ARCHITECTURE.example.md) | 系统架构概览（不含敏感信息） |
 | [开发指南](./DEVELOPMENT.md) | 开发环境设置和代码规范 |
+| [快速开始](./QUICK_START.md) | 3 步上手指南 |
 
 ---
 
@@ -29,12 +30,19 @@
 
 | 文档 | 描述 |
 |------|------|
-| [快速开始](./QUICK_START.md) | 3 步上手指南 |
 | [用户指南](./USER_GUIDE.md) | 完整的功能使用说明 |
 | [图片风格预设设计](./IMAGE_STYLE_PRESET_DESIGN.md) | 相册风格预设功能设计 |
 | [上传队列逻辑](./UPLOAD_QUEUE_LOGIC.md) | 照片上传和处理队列说明 |
 | [移动端优化](./MOBILE_OPTIMIZATION.md) | 移动端用户体验优化 |
-| [实现状态](./IMPLEMENTATION_STATUS.md) | 功能实现进度追踪 |
+
+---
+
+## 🧪 测试文档
+
+| 文档 | 描述 |
+|------|------|
+| [测试指南](./TESTING.md) | 完整的测试使用指南 |
+| [测试覆盖分析](./TEST_COVERAGE_ANALYSIS.md) | 详细的测试覆盖分析报告 |
 
 ---
 
@@ -46,6 +54,7 @@
 | [环境变量配置](./ENVIRONMENT_VARIABLES.md) | 环境变量详细说明（敏感信息版本） |
 | [数据库重置](./RESET_DATABASE.md) | 数据库重置和清理 |
 | [日志配置](./LOGGING.md) | 日志系统配置 |
+| [日志位置](./LOG_LOCATIONS.md) | 日志文件位置说明 |
 | [SSL 问题修复](./SSL_FIX.md) | macOS 开发环境 SSL 证书问题 |
 
 ---
@@ -56,10 +65,18 @@
 |------|------|
 | [Docker 容器和存储卷](./DOCKER_CONTAINERS_AND_VOLUMES.md) | 容器命名和组织说明 |
 | [Docker 网络和端口](./DOCKER_NETWORK_AND_PORTS.md) | 网络配置和端口说明 |
-| [Nginx 容器分析](./NGINX_CONTAINER_ANALYSIS.md) | Nginx 容器作用和配置 |
+| [统一入口架构](./UNIFIED_ENTRY_ARCHITECTURE.md) | 统一入口架构设计说明 |
 | [端口冲突解决方案](./PORT_CONFLICT_SOLUTIONS.md) | 端口冲突处理方案 |
 | [Frpc/DDNSTO 配置指南](./FRPC_DDNSTO_SETUP.md) | 内网穿透配置指南 |
-| [统一入口架构](./UNIFIED_ENTRY_ARCHITECTURE.md) | 统一入口架构设计说明 |
+
+---
+
+## 🏗️ 架构文档
+
+| 文档 | 描述 |
+|------|------|
+| [架构示例](./ARCHITECTURE.example.md) | 系统架构概览（公开版本） |
+| [架构路径](./ARCHITECTURE_PATHS.md) | 系统路径和路由说明 |
 
 ---
 
@@ -71,6 +88,7 @@ docs/
 ├── DEPLOYMENT_CHECKLIST.md        # 部署检查清单
 ├── DEVELOPMENT.md                 # 开发指南
 ├── SECURITY.md                    # 安全指南
+├── TESTING.md                     # 测试指南
 ├── ARCHITECTURE.example.md        # 架构示例（公开版本）
 ├── FONTS.md                       # 字体配置指南
 ├── QUICK_START.md                 # 快速开始
@@ -81,15 +99,11 @@ docs/
 │   │   └── DEPLOYMENT.md          # 英文部署指南
 │   └── zh-CN/
 │       └── DEPLOYMENT.md          # 中文部署指南
-├── archive/
-│   ├── migration/                 # 迁移文档（已完成，归档）
-│   └── development/               # 开发过程文档（已完成，归档）
-└── [功能文档]
-    ├── IMAGE_STYLE_PRESET_DESIGN.md
-    ├── UPLOAD_QUEUE_LOGIC.md
-    ├── MOBILE_OPTIMIZATION.md
-    ├── IMPLEMENTATION_STATUS.md
-    └── ...
+└── archive/
+    ├── migration/                 # 迁移文档（已完成，归档）
+    ├── development/               # 开发过程文档（已完成，归档）
+    ├── testing/                   # 测试报告（已完成，归档）
+    └── database-schema/           # 数据库验证文档（已完成，归档）
 ```
 
 ---
@@ -105,16 +119,17 @@ docs/
 
 ---
 
-## 📝 文档清理说明
+## 📝 文档维护说明
 
 文档已进行清理和整合：
 
 - ✅ **迁移文档**：已归档到 `archive/migration/`（迁移已完成）
 - ✅ **开发过程文档**：已归档到 `archive/development/`（开发已完成）
+- ✅ **测试报告**：已归档到 `archive/testing/`（测试已完成）
+- ✅ **数据库验证文档**：已归档到 `archive/database-schema/`（验证已完成）
 - ✅ **部署文档**：已整合，删除重复文档
-- ✅ **字体文档**：已整合为 `FONTS.md`
-
-详细清理计划见：[文档清理计划](./DOCUMENTATION_CLEANUP_PLAN.md)
+- ✅ **测试文档**：已整合为 `TESTING.md`
+- ✅ **脚本文档**：统一在 `scripts/` 目录下
 
 ---
 

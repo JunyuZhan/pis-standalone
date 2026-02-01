@@ -213,7 +213,6 @@ export class COSAdapter implements StorageAdapter {
         destKey,
         source
       );
-      console.log(`[COS] Copied ${srcKey} -> ${destKey}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[COS] Error copying ${srcKey} to ${destKey}:`, errorMessage);

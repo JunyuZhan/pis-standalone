@@ -72,6 +72,9 @@ RUN pnpm build
 # ============================================
 FROM node:20-alpine AS runner
 
+# 安装 curl（用于健康检查）
+RUN apk add --no-cache curl
+
 WORKDIR /app
 
 # 创建非 root 用户（安全最佳实践）
@@ -98,8 +101,9 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # 健康检查（检查 HTTP 服务是否正常）
+# 使用 curl（Alpine 镜像默认包含）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD curl -f http://localhost:3000/health || exit 1
 
 # 运行 Next.js standalone 服务器（monorepo 结构下的路径）
 CMD ["node", "apps/web/server.js"]

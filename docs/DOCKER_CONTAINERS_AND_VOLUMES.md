@@ -8,22 +8,21 @@
 
 ### 容器统计
 
-- **Standalone 模式（完全自托管）**: **7 个容器**
+- **Standalone 模式（完全自托管）**: **6 个容器**
 - **混合模式（Worker + 存储）**: **4 个容器**
 - **PostgreSQL 模式**: **5 个容器**
 
 ### 容器列表
 
-#### Standalone 模式（完全自托管）- 7 个容器
+#### Standalone 模式（完全自托管）- 6 个容器
 1. `pis-postgres` - PostgreSQL 数据库
 2. `pis-minio` - MinIO 对象存储
 3. `pis-minio-init` - MinIO 初始化容器（一次性任务）
 4. `pis-redis` - Redis 任务队列/缓存
 5. `pis-worker` - 图片处理 Worker 服务
-6. `pis-web` - Next.js Web 前端
-7. `pis-nginx` - Nginx 反向代理（可选，可用主机 Nginx 替代）
+6. `pis-web` - Next.js Web 前端（集成 Nginx 代理功能）
 
-> **注意**: `pis-nginx` 不是必须的。如果使用主机上的 Nginx 或云负载均衡器，可以移除这个容器，减少到 6 个容器。详见 [NGINX_CONTAINER_ANALYSIS.md](./NGINX_CONTAINER_ANALYSIS.md)
+> **注意**: Nginx 功能已集成到 `pis-web` 容器中，通过 Next.js API Routes 实现代理功能。详见 [NGINX_TO_NEXTJS_INTEGRATION.md](./NGINX_TO_NEXTJS_INTEGRATION.md)
 
 #### 混合模式（Worker + 存储）- 4 个容器
 1. `pis-minio` - MinIO 对象存储
@@ -48,10 +47,8 @@
 - `pis_postgres_data` - PostgreSQL 数据目录
 - `pis_minio_data` - MinIO 数据目录
 - `pis_redis_data` - Redis 数据目录
-- `pis_nginx_logs` - Nginx 日志目录
 - `pis_worker_logs` - Worker 日志目录
 - `pis_web_logs` - Web 日志目录
-- `pis_certs` - Let's Encrypt SSL 证书（使用 certbot 时）
 
 #### 混合模式
 - `pis_minio_data` - MinIO 数据目录

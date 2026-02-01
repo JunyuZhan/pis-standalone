@@ -41,7 +41,8 @@ export function PhotoGroupManager({
       const response = await fetch(`/api/admin/albums/${albumId}/groups`)
       if (response.ok) {
         const data = await response.json()
-        setGroups(data.groups || [])
+        // API 返回格式是 { data: { groups: [...] } }
+        setGroups(data.data?.groups || data.groups || [])
       }
     } catch (error) {
       console.error('Failed to load groups:', error)

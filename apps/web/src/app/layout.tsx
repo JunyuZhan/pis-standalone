@@ -105,6 +105,10 @@ export async function generateMetadata(): Promise<Metadata> {
     title,
     description,
     manifest: '/manifest.json',
+    icons: {
+      icon: '/favicon.ico',
+      apple: '/icons/icon-192x192.png',
+    },
     appleWebApp: {
       capable: true,
       statusBarStyle: 'black-translucent',
@@ -155,6 +159,10 @@ export default async function RootLayout({
           </>
         )}
         {/* 本地字体，无需预连接 Google Fonts */}
+        
+        {/* Favicon */}
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
         
         {/* PWA Apple 特定 meta */}
         <meta name="apple-mobile-web-app-capable" content="yes" />

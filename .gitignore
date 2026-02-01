@@ -56,6 +56,12 @@ next-env.d.ts
 
 # Docker
 docker/.env
+docker/.env.generated
+docker/.deployment-info
+
+# Deployment
+.env.generated
+.deployment-info
 
 # Database
 *.db

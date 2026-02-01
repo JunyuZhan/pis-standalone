@@ -153,7 +153,11 @@ export default async function AlbumDetailPage({ params }: AlbumDetailPageProps) 
       </div>
 
       {/* 客户端组件：上传和照片网格 */}
-      <AlbumDetailClient album={album} initialPhotos={photos} />
+        <AlbumDetailClient 
+          album={album} 
+          initialPhotos={photos}
+          mediaUrl={process.env.NEXT_PUBLIC_MEDIA_URL}
+        />
     </div>
   )
 }

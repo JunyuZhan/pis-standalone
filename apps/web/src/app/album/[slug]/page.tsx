@@ -237,18 +237,28 @@ export default async function AlbumPage({ params, searchParams }: AlbumPageProps
   const photos = (photosResult.data || []) as Photo[]
 
   // 获取照片分组关联（如果相册有分组）
+  // 优化：批量查询所有分组的照片关联，避免 N+1 查询问题
   const photoGroupMap: Map<string, string[]> = new Map()
   if (groups.length > 0) {
-    for (const group of groups) {
-      const assignmentsResult = await db
-        .from('photo_group_assignments')
-        .select('photo_id')
-        .eq('group_id', group.id)
-        .execute()
-      
-      if (assignmentsResult.data) {
-        photoGroupMap.set(group.id, assignmentsResult.data.map((a: any) => a.photo_id))
-      }
+    const groupIds = groups.map((g) => g.id)
+    
+    // 批量查询所有分组的照片关联
+    const assignmentsResult = await db
+      .from('photo_group_assignments')
+      .select('group_id, photo_id')
+      .in('group_id', groupIds)
+      .execute()
+    
+    if (assignmentsResult.data) {
+      const assignments = assignmentsResult.data as unknown as { group_id: string; photo_id: string }[]
+      // 将查询结果按分组 ID 分组
+      assignments.forEach((assignment) => {
+        const groupId = assignment.group_id
+        if (!photoGroupMap.has(groupId)) {
+          photoGroupMap.set(groupId, [])
+        }
+        photoGroupMap.get(groupId)!.push(assignment.photo_id)
+      })
     }
   }
 

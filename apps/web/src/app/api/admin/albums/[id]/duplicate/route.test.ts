@@ -189,9 +189,11 @@ describe('POST /api/admin/albums/[id]/duplicate', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.id).toBe(newAlbum.id)
-      expect(data.title).toBe('Original Album (副本)')
-      expect(data.message).toBe('相册已复制')
+      // API 返回格式是 { data: {...} }
+      expect(data.data).toBeDefined()
+      expect(data.data.id).toBe(newAlbum.id)
+      expect(data.data.title).toBe('Original Album (副本)')
+      expect(data.data.message).toBe('相册已复制')
       expect(mockDb.insert).toHaveBeenCalledWith(
         'albums',
         expect.objectContaining({

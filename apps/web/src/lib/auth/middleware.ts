@@ -1,22 +1,64 @@
 /**
- * 自定义认证中间件
- * 
+ * PIS Web - 自定义认证中间件
+ *
  * 用于完全自托管模式，不依赖 Supabase
+ *
+ * @author PIS Contributors
+ * @license MIT
+ *
+ * @description
+ * 提供 Next.js 中间件功能：
+ * - 自动刷新即将过期的令牌
+ * - 管理后台页面认证保护
+ * - 登录页面重定向逻辑
+ *
+ * @example
+ * ```typescript
+ * // middleware.ts
+ * import { updateSession } from '@/lib/auth/middleware'
+ *
+ * export async function middleware(request: NextRequest) {
+ *   return updateSession(request)
+ * }
+ * ```
  */
 import { NextResponse, type NextRequest } from 'next/server'
-import { getUserFromRequest, updateSessionMiddleware } from './index'
-import { initAuthDatabase } from './database'
-
-// 初始化认证数据库（如果尚未初始化）
-try {
-  initAuthDatabase()
-} catch {
-  // 可能已经初始化，忽略错误
-}
+import { getUserFromRequest, updateSessionMiddleware } from './jwt-helpers'
 
 /**
  * 更新会话中间件
- * 刷新即将过期的令牌，并处理认证重定向
+ *
+ * @description
+ * 执行以下操作：
+ * 1. 刷新即将过期的令牌
+ * 2. 检查用户认证状态
+ * 3. 处理管理后台页面认证
+ * 4. 处理登录页面重定向
+ *
+ * 路由规则：
+ * - `/admin/login` - 未登录可访问，已登录重定向到 `/admin`
+ * - `/admin/*` - 需要登录，未登录重定向到 `/admin/login`
+ *
+ * @param request - Next.js 请求对象
+ * @returns Next.js 响应对象
+ *
+ * @example
+ * ```typescript
+ * // 在项目根目录的 middleware.ts 中
+ * import { updateSession } from '@/lib/auth/middleware'
+ *
+ * export { updateSession as middleware } from '@/lib/auth/middleware'
+ *
+ * // 或使用自定义配置
+ * import { updateSession } from '@/lib/auth/middleware'
+ * import { NextResponse } from 'next/server'
+ *
+ * export async function middleware(request: NextRequest) {
+ *   const response = await updateSession(request)
+ *   // 添加自定义逻辑...
+ *   return response
+ * }
+ * ```
  */
 export async function updateSession(request: NextRequest) {
   // 更新会话（刷新令牌）

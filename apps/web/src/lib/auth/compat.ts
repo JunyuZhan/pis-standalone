@@ -10,7 +10,6 @@ import {
   getCurrentUser,
   getUserFromRequest,
   destroySession,
-  AuthUser,
 } from './index'
 
 // ==================== 兼容类型 ====================
@@ -105,7 +104,8 @@ class CustomAuthClient {
   /**
    * 使用密码登录
    */
-  async signInWithPassword(credentials: {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async signInWithPassword(_credentials: {
     email: string
     password: string
   }): Promise<{ data: { user: SupabaseUser | null; session: SupabaseSession | null }; error: AuthError | null }> {
@@ -132,7 +132,8 @@ class CustomAuthClient {
   /**
    * 注册新用户
    */
-  async signUp(credentials: {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async signUp(_credentials: {
     email: string
     password: string
   }): Promise<{ data: { user: SupabaseUser | null; session: SupabaseSession | null }; error: AuthError | null }> {
@@ -147,6 +148,7 @@ class CustomAuthClient {
    * 监听认证状态变化（客户端使用）
    * 注意：在自定义认证中，这是一个空实现
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onAuthStateChange(_callback: (event: string, session: SupabaseSession | null) => void): {
     data: { subscription: { unsubscribe: () => void } }
   } {
@@ -182,7 +184,8 @@ export function createCompatAuthClient() {
  * 从请求创建兼容的 Auth 客户端
  * @deprecated Not used - PIS now uses PostgreSQL by default
  */
-export function createCompatAuthClientFromRequest(_request: NextRequest, _response?: NextResponse) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function createCompatAuthClientFromRequest(_request: NextRequest) {
   return {
     auth: new CustomAuthClient(),
     from: () => {

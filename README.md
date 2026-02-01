@@ -110,12 +110,26 @@
 
 ### One-Click Deployment
 
+**🚀 True One-Click Deployment (Fully Automated)**
+
 ```bash
-# One command to install (copy and paste)
-curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/install.sh | tr -d '\r' | bash
+# One command to deploy everything (no interaction required)
+curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/one-click-deploy.sh | bash
 ```
 
-> 💡 **Note**: The `tr -d '\r'` command ensures compatibility across different systems by removing Windows line endings. The script also includes automatic line ending cleanup as a fallback.
+This script will automatically:
+- ✅ Install Docker and Docker Compose (if not installed)
+- ✅ Clone the repository (if not in project directory)
+- ✅ Generate all configuration files with secure random secrets
+- ✅ Start all services (PostgreSQL + MinIO + Redis + Web + Worker + Nginx)
+- ✅ Create admin account (password setup on first login)
+
+**📋 Interactive Deployment (Guided Setup)**
+
+```bash
+# Interactive configuration wizard
+curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/install.sh | tr -d '\r' | bash
+```
 
 Or manually:
 
@@ -125,10 +139,11 @@ cd pis-standalone/docker
 bash deploy.sh
 ```
 
-The script will guide you through:
+The interactive script will guide you through:
 - ✅ Configure PostgreSQL database
 - ✅ Auto-generate security secrets
 - ✅ Configure storage (MinIO)
+- ✅ Configure domain and SSL
 - ✅ Start all services (PostgreSQL + MinIO + Redis + Web + Worker + Nginx)
 
 > 📖 **Detailed guide**: [Deployment Documentation](docs/i18n/en/DEPLOYMENT.md)

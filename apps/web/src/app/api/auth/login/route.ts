@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { checkRateLimit } from '@/middleware-rate-limit'
 import { 
-  verifyPassword, 
   createSession, 
   getAuthDatabase 
 } from '@/lib/auth'
+import { verifyPassword } from '@/lib/auth/password'
 import { initAuthDatabase } from '@/lib/auth/database'
 import { loginSchema } from '@/lib/validation/schemas'
 import { safeValidate, handleError, createSuccessResponse } from '@/lib/validation/error-handler'
@@ -76,19 +76,60 @@ export async function POST(request: NextRequest) {
     // 解析和验证请求体
     let body: unknown
     try {
+      const contentType = request.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        return NextResponse.json(
+          { error: '请求格式错误：Content-Type 必须是 application/json' },
+          { status: 400 }
+        )
+      }
       body = await request.json()
-    } catch {
-      return handleError(new Error('请求格式错误'), '请求格式错误')
+    } catch (error) {
+      return NextResponse.json(
+        { error: `请求格式错误：${error instanceof Error ? error.message : '无法解析 JSON'}` },
+        { status: 400 }
+      )
     }
 
     // 验证输入（不包括 turnstileToken，单独处理）
     const validation = safeValidate(loginSchema, body)
     if (!validation.success) {
-      return handleError(validation.error, '输入验证失败')
+      // 返回详细的验证错误信息
+      const errorDetails = validation.error.errors.map((err) => ({
+        field: err.path.join('.'),
+        message: err.message,
+      }))
+      
+      // 构建友好的错误消息
+      const firstError = validation.error.errors[0]
+      let errorMessage = '输入验证失败'
+      if (firstError.path[0] === 'email') {
+        errorMessage = firstError.message || '请输入有效的邮箱地址或用户名 admin'
+      } else if (firstError.path[0] === 'password') {
+        errorMessage = '密码不能为空'
+      }
+      
+      return NextResponse.json(
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: errorMessage,
+            details: errorDetails,
+          },
+        },
+        { status: 400 }
+      )
     }
 
-    const { email, password } = validation.data
+    let { email } = validation.data
+    const { password } = validation.data
     const turnstileToken = (body as { turnstileToken?: string }).turnstileToken
+    
+    // 支持用户名登录：如果输入的是 "admin"，转换为 admin@example.com
+    // 注意：这里只处理 "admin" 用户名，其他用户名需要是有效的邮箱格式
+    if (email.toLowerCase() === 'admin') {
+      email = 'admin@example.com'
+    }
 
     // 如果配置了 Turnstile，验证 token
     const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY
@@ -119,26 +160,11 @@ export async function POST(request: NextRequest) {
 
         if (!verifyData.success) {
           console.error('Turnstile verification failed:', verifyData)
-          console.log(JSON.stringify({
-            type: 'turnstile_verification',
-            success: false,
-            ip,
-            reason: verifyData['error-codes'] || 'unknown',
-            timestamp: new Date().toISOString(),
-          }))
           return NextResponse.json(
             { error: { code: 'CAPTCHA_FAILED', message: '人机验证失败，请重试' } },
             { status: 400 }
           )
         }
-
-        // 记录成功的验证
-        console.log(JSON.stringify({
-          type: 'turnstile_verification',
-          success: true,
-          ip,
-          timestamp: new Date().toISOString(),
-        }))
       } catch (error) {
         console.error('Turnstile verification error:', error)
         return NextResponse.json(
@@ -208,18 +234,6 @@ export async function POST(request: NextRequest) {
       
       if (!user) {
         // 用户不存在，返回统一错误消息（防止用户枚举）
-        const maskedEmail = normalizedEmail.length > 3 
-          ? normalizedEmail.substring(0, 3) + '***' 
-          : '***'
-        console.log(JSON.stringify({
-          type: 'login_attempt',
-          email: maskedEmail,
-          ip,
-          success: false,
-          reason: 'user_not_found',
-          timestamp: new Date().toISOString(),
-        }))
-
         return NextResponse.json(
           {
             error: {
@@ -238,23 +252,35 @@ export async function POST(request: NextRequest) {
         )
       }
 
+      // 检查密码是否已设置
+      // password_hash 为 null 或空字符串表示密码未设置
+      if (!user.password_hash || (typeof user.password_hash === 'string' && user.password_hash.trim() === '')) {
+        // 密码未设置，返回特殊状态码提示需要设置密码
+        return NextResponse.json(
+          {
+            error: {
+              code: 'PASSWORD_NOT_SET',
+              message: '首次登录需要设置密码',
+            },
+            requiresPasswordSetup: true,
+            email: user.email,
+          },
+          {
+            status: 428, // 428 Precondition Required
+            headers: {
+              'X-RateLimit-Limit': '5',
+              'X-RateLimit-Remaining': (ipRateLimit.remaining - 1).toString(),
+              'X-RateLimit-Reset': new Date(ipRateLimit.resetAt).toISOString(),
+            },
+          }
+        )
+      }
+
       // 验证密码
       const isValidPassword = await verifyPassword(password, user.password_hash)
       
       if (!isValidPassword) {
         // 密码错误，返回统一错误消息
-        const maskedEmail = normalizedEmail.length > 3 
-          ? normalizedEmail.substring(0, 3) + '***' 
-          : '***'
-        console.log(JSON.stringify({
-          type: 'login_attempt',
-          email: maskedEmail,
-          ip,
-          success: false,
-          reason: 'invalid_password',
-          timestamp: new Date().toISOString(),
-        }))
-
         return NextResponse.json(
           {
             error: {
@@ -286,18 +312,6 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      // 记录成功的登录尝试（用于安全审计）
-      const maskedEmail = normalizedEmail.length > 3 
-        ? normalizedEmail.substring(0, 3) + '***' 
-        : '***'
-      console.log(JSON.stringify({
-        type: 'login_attempt',
-        email: maskedEmail,
-        ip,
-        success: true,
-        timestamp: new Date().toISOString(),
-      }))
-
       // 会话 cookies 已由 createSession 设置
       return createSuccessResponse(
         {
@@ -312,18 +326,6 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       // 数据库错误或其他内部错误
       console.error('Login error:', error)
-      
-      const maskedEmail = normalizedEmail.length > 3 
-        ? normalizedEmail.substring(0, 3) + '***' 
-        : '***'
-      console.log(JSON.stringify({
-        type: 'login_attempt',
-        email: maskedEmail,
-        ip,
-        success: false,
-        reason: 'internal_error',
-        timestamp: new Date().toISOString(),
-      }))
 
       // 统一错误消息，不暴露内部错误
       return NextResponse.json(

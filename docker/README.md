@@ -11,7 +11,7 @@
 | **前端** | 自建服务器 | Next.js 应用（Docker 容器） |
 | **数据库** | 自建服务器 | PostgreSQL 数据库（Docker 容器，自动初始化） |
 | **存储/Worker** | 自建服务器 | MinIO + Redis + Worker 服务（Docker 容器） |
-| **反向代理** | 自建服务器 | Nginx（SSL/TLS 终止） |
+| **反向代理** | 自建服务器 | Next.js Web 容器（集成代理功能） |
 
 **混合部署（可选，向后兼容）**
 
@@ -167,12 +167,12 @@ docker compose up -d --build
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| web | 80/443 | Next.js 前端（通过 Nginx） |
-| worker | 3001 | 图片处理服务（自托管） |
-| postgres | 5432 | PostgreSQL 数据库（自托管） |
-| minio | 9000/9001 | 对象存储（自托管） |
-| redis | 6379 | 任务队列（自托管） |
-| nginx | 80/443 | 反向代理和 SSL 终止 |
+| nginx | 8081 | 反向代理（唯一对外暴露端口，所有服务通过路径访问） |
+| web | 容器内 | Next.js 前端（通过 Nginx 访问） |
+| worker | 容器内 | 图片处理服务（通过 Nginx /worker-api/ 访问） |
+| postgres | 容器内 | PostgreSQL 数据库（仅容器内访问） |
+| minio | 容器内 | 对象存储（通过 Nginx /media/ 和 /minio-console/ 访问） |
+| redis | 容器内 | 任务队列（仅容器内访问） |
 
 ## 故障排查
 

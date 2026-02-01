@@ -427,5 +427,5 @@ docker logs pis-nginx
 ## 📚 相关文档
 
 - [Docker 网络和端口配置](./DOCKER_NETWORK_AND_PORTS.md)
-- [Nginx 容器分析](./NGINX_CONTAINER_ANALYSIS.md)
+- [Nginx 集成说明](./NGINX_INTEGRATION_COMPLETE.md)
 - [部署检查清单](./DEPLOYMENT_CHECKLIST.md)

@@ -32,22 +32,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 增加相册照片数量的函数
+-- 增加相册照片数量的函数（重新计算，确保准确）
 CREATE OR REPLACE FUNCTION increment_photo_count(album_id UUID)
 RETURNS void AS $$
 BEGIN
-    UPDATE albums
-    SET photo_count = photo_count + 1
+    UPDATE albums 
+    SET photo_count = (
+        SELECT COUNT(*) FROM photos 
+        WHERE photos.album_id = increment_photo_count.album_id 
+        AND status = 'completed' 
+        AND deleted_at IS NULL
+    )
     WHERE id = album_id;
 END;
 $$ LANGUAGE plpgsql;
 
--- 减少相册照片数量的函数
+-- 减少相册照片数量的函数（重新计算，确保准确）
 CREATE OR REPLACE FUNCTION decrement_photo_count(album_id UUID)
 RETURNS void AS $$
 BEGIN
-    UPDATE albums
-    SET photo_count = GREATEST(photo_count - 1, 0)
+    UPDATE albums 
+    SET photo_count = GREATEST(0, (
+        SELECT COUNT(*) FROM photos 
+        WHERE photos.album_id = decrement_photo_count.album_id 
+        AND status = 'completed' 
+        AND deleted_at IS NULL
+    ))
     WHERE id = album_id;
 END;
 $$ LANGUAGE plpgsql;
@@ -59,6 +69,28 @@ BEGIN
     UPDATE albums
     SET view_count = view_count + 1
     WHERE id = album_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 触发器包装函数：插入照片时更新照片数量
+CREATE OR REPLACE FUNCTION trigger_increment_photo_count()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.deleted_at IS NULL AND NEW.status = 'completed' THEN
+        PERFORM increment_photo_count(NEW.album_id);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 触发器包装函数：删除照片时更新照片数量
+CREATE OR REPLACE FUNCTION trigger_decrement_photo_count()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN
+        PERFORM decrement_photo_count(NEW.album_id);
+    END IF;
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -128,7 +160,7 @@ CREATE TABLE IF NOT EXISTS albums (
     watermark_enabled BOOLEAN DEFAULT false,
     watermark_type TEXT CHECK (watermark_type IN ('text', 'logo')),
     watermark_config JSONB DEFAULT '{}',
-    color_grading JSONB,
+    color_grading JSONB DEFAULT '{}',
     share_title TEXT,
     share_description TEXT,
     share_image_url TEXT,
@@ -139,6 +171,7 @@ CREATE TABLE IF NOT EXISTS albums (
     photo_count INTEGER DEFAULT 0,
     selected_count INTEGER DEFAULT 0,
     view_count INTEGER DEFAULT 0,
+    metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     deleted_at TIMESTAMPTZ
@@ -161,7 +194,7 @@ CREATE TABLE IF NOT EXISTS photos (
     captured_at TIMESTAMPTZ,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
     is_selected BOOLEAN DEFAULT false,
-    sort_order INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,  -- 手动排序顺序
     rotation INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -173,7 +206,17 @@ CREATE TABLE IF NOT EXISTS album_templates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
-    config JSONB DEFAULT '{}',
+    is_public BOOLEAN DEFAULT false,
+    layout TEXT DEFAULT 'masonry' CHECK (layout IN ('masonry', 'grid', 'carousel')),
+    sort_rule TEXT DEFAULT 'capture_desc' CHECK (sort_rule IN ('capture_desc', 'capture_asc', 'manual')),
+    allow_download BOOLEAN DEFAULT true,
+    allow_batch_download BOOLEAN DEFAULT false,
+    show_exif BOOLEAN DEFAULT true,
+    password TEXT,
+    expires_at TIMESTAMPTZ,
+    watermark_enabled BOOLEAN DEFAULT false,
+    watermark_type TEXT CHECK (watermark_type IN ('text', 'logo')),
+    watermark_config JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -183,9 +226,16 @@ CREATE TABLE IF NOT EXISTS package_downloads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     album_id UUID NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
     photo_ids UUID[] NOT NULL,
+    include_watermarked BOOLEAN DEFAULT true,
+    include_original BOOLEAN DEFAULT false,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+    zip_key TEXT,
+    file_size BIGINT,
     download_url TEXT,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    expires_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 照片分组表
@@ -201,10 +251,10 @@ CREATE TABLE IF NOT EXISTS photo_groups (
 
 -- 照片分组关联表
 CREATE TABLE IF NOT EXISTS photo_group_assignments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    group_id UUID NOT NULL REFERENCES photo_groups(id) ON DELETE CASCADE,
     photo_id UUID NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    group_id UUID NOT NULL REFERENCES photo_groups(id) ON DELETE CASCADE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (photo_id, group_id),
     UNIQUE(group_id, photo_id)
 );
 
@@ -213,13 +263,28 @@ CREATE TABLE IF NOT EXISTS photo_group_assignments (
 -- ============================================
 
 CREATE INDEX IF NOT EXISTS idx_albums_slug ON albums(slug);
-CREATE INDEX IF NOT EXISTS idx_albums_deleted_at ON albums(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_albums_created_at ON albums(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_albums_deleted_at ON albums(deleted_at) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_albums_event_date ON albums(event_date) WHERE event_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_albums_is_public ON albums(is_public) WHERE is_public = true AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_albums_is_live ON albums(is_live) WHERE is_live = true AND deleted_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_photos_album_id ON photos(album_id);
 CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
-CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos(deleted_at);
-CREATE INDEX IF NOT EXISTS idx_photos_sort_order ON photos(album_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_photos_created_at ON photos(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_photos_captured_at ON photos(captured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos(deleted_at) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_photos_album_status ON photos(album_id, status) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_photos_is_selected ON photos(is_selected) WHERE is_selected = true AND deleted_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_package_downloads_album_id ON package_downloads(album_id);
+CREATE INDEX IF NOT EXISTS idx_package_downloads_status ON package_downloads(status);
+
+CREATE INDEX IF NOT EXISTS idx_album_templates_name ON album_templates(name);
+
 CREATE INDEX IF NOT EXISTS idx_photo_groups_album_id ON photo_groups(album_id);
+CREATE INDEX IF NOT EXISTS idx_photo_groups_sort_order ON photo_groups(album_id, sort_order);
+
 CREATE INDEX IF NOT EXISTS idx_photo_group_assignments_group_id ON photo_group_assignments(group_id);
 CREATE INDEX IF NOT EXISTS idx_photo_group_assignments_photo_id ON photo_group_assignments(photo_id);
 
@@ -253,18 +318,21 @@ CREATE TRIGGER update_photo_groups_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
+CREATE TRIGGER update_package_downloads_updated_at
+    BEFORE UPDATE ON package_downloads
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at();
+
 -- 自动更新照片数量
 CREATE TRIGGER increment_photo_count_on_insert
     AFTER INSERT ON photos
     FOR EACH ROW
-    WHEN (NEW.deleted_at IS NULL)
-    EXECUTE FUNCTION increment_photo_count(NEW.album_id);
+    EXECUTE FUNCTION trigger_increment_photo_count();
 
 CREATE TRIGGER decrement_photo_count_on_delete
     AFTER UPDATE ON photos
     FOR EACH ROW
-    WHEN (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
-    EXECUTE FUNCTION decrement_photo_count(NEW.album_id);
+    EXECUTE FUNCTION trigger_decrement_photo_count();
 
 -- 自动更新选中照片数量
 CREATE TRIGGER update_selected_count

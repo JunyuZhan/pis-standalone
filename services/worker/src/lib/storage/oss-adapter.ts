@@ -211,7 +211,6 @@ export class OSSAdapter implements StorageAdapter {
         destKey,
         source
       );
-      console.log(`[OSS] Copied ${srcKey} -> ${destKey}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[OSS] Error copying ${srcKey} to ${destKey}:`, errorMessage);

@@ -1,91 +1,162 @@
 /**
- * PIS Photo Processor - Image Processing with Sharp
- * 
- * @author junyuzhan <junyuzhan@outlook.com>
- * @license MIT
+ * @fileoverview PIS Worker - 照片处理模块
+ *
+ * @description
+ * 使用 Sharp 进行图片处理，包括：
+ * - 自动/手动旋转
+ * - 风格预设应用
+ * - 水印添加（文本/Logo）
+ * - BlurHash 生成
+ * - 缩略图和预览图生成
+ * - EXIF 数据提取和清理
+ *
+ * @module worker/processor
+ *
+ * @example
+ * ```typescript
+ * import { PhotoProcessor } from './processor.js'
+ *
+ * const processor = new PhotoProcessor(imageBuffer)
+ * const result = await processor.process(
+ *   { enabled: true, watermarks: [...] },
+ *   90, // 手动旋转角度
+ *   'japanese-fresh' // 风格预设
+ * )
+ * ```
  */
+import sharp from 'sharp'
+import { encode } from 'blurhash'
+import exifReader from 'exif-reader'
+import { STYLE_PRESETS, getPresetById, type StylePresetConfig } from './lib/style-presets.js'
 
-import sharp from 'sharp';
-import { encode } from 'blurhash';
-import exifReader from 'exif-reader';
-import { STYLE_PRESETS, getPresetById, type StylePresetConfig } from './lib/style-presets.js';
-
+/**
+ * 处理结果
+ */
 export interface ProcessedResult {
-  metadata: sharp.Metadata;
-  exif: any;
-  blurHash: string;
-  thumbBuffer: Buffer;
-  previewBuffer: Buffer;
+  /** 图片元数据 */
+  metadata: sharp.Metadata
+  /** EXIF 数据（已清理 GPS 信息） */
+  exif: any
+  /** BlurHash 字符串 */
+  blurHash: string
+  /** 缩略图 Buffer */
+  thumbBuffer: Buffer
+  /** 预览图 Buffer（带水印） */
+  previewBuffer: Buffer
 }
 
+/**
+ * 单个水印配置
+ */
 export interface SingleWatermark {
-  id?: string; // 用于UI管理
-  type: 'text' | 'logo';
-  text?: string;
-  logoUrl?: string; // MinIO 或其他可访问的 Logo 图片 URL
-  opacity: number; // 0-1
-  position: string; // 'top-left' | 'top-center' | 'top-right' | 'center-left' | 'center' | 'center-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'
-  size?: number; // 字体大小或Logo尺寸（可选，自动计算）
-  margin?: number; // 边距（百分比，0-20，默认5）
-  enabled?: boolean; // 单个水印是否启用
+  /** 水印 ID（用于 UI 管理） */
+  id?: string
+  /** 水印类型 */
+  type: 'text' | 'logo'
+  /** 文本内容（type 为 text 时使用） */
+  text?: string
+  /** Logo URL（type 为 logo 时使用，需为 MinIO 或其他可访问的 URL） */
+  logoUrl?: string
+  /** 不透明度（0-1） */
+  opacity: number
+  /** 位置 */
+  position: 'top-left' | 'top-center' | 'top-right' | 'center-left' | 'center' | 'center-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'
+  /** 字体大小或 Logo 尺寸（可选，自动计算） */
+  size?: number
+  /** 边距（百分比，0-20，默认 5） */
+  margin?: number
+  /** 是否启用 */
+  enabled?: boolean
 }
 
+/**
+ * 水印配置（支持单个或多个水印）
+ */
 export interface WatermarkConfig {
-  enabled: boolean;
-  // 兼容旧格式：单个水印
-  type?: 'text' | 'logo';
-  text?: string;
-  logoUrl?: string;
-  opacity?: number;
-  position?: string;
-  // 新格式：多个水印（最多6个）
-  watermarks?: SingleWatermark[];
+  /** 是否启用水印 */
+  enabled: boolean
+  // 旧格式兼容：单个水印
+  /** 水印类型（旧格式） */
+  type?: 'text' | 'logo'
+  /** 文本内容（旧格式） */
+  text?: string
+  /** Logo URL（旧格式） */
+  logoUrl?: string
+  /** 不透明度（旧格式） */
+  opacity?: number
+  /** 位置（旧格式） */
+  position?: string
+  // 新格式：多个水印（最多 6 个）
+  /** 水印数组（新格式） */
+  watermarks?: SingleWatermark[]
 }
 
+/**
+ * 照片处理器类
+ *
+ * @description
+ * 封装图片处理逻辑，支持旋转、水印、BlurHash 等功能
+ */
 export class PhotoProcessor {
-  private image: sharp.Sharp;
+  /** Sharp 图像实例 */
+  private image: sharp.Sharp
 
+  /**
+   * 创建照片处理器实例
+   *
+   * @param buffer - 图片 Buffer
+   */
   constructor(buffer: Buffer) {
-    this.image = sharp(buffer);
+    this.image = sharp(buffer)
   }
 
   /**
    * 验证 Logo URL 是否安全（防止 SSRF 攻击）
+   *
+   * @description
+   * - 检查协议是否为 HTTP/HTTPS
+   * - 拒绝访问内网地址（localhost、127.0.0.1、192.168.x.x、10.x.x.x）
+   * - 如果配置了白名单，仅允许白名单域名
+   *
+   * @param url - 待验证的 URL
+   * @returns URL 安全返回 true，否则返回 false
+   *
+   * @internal
    */
   private isValidLogoUrl(url: string): boolean {
     try {
       const urlObj = new URL(url);
       const allowedProtocols = ['https:', 'http:'];
-      
-      // 从环境变量获取允许的域名白名单
+
+      // Get allowed domain whitelist from environment variables
       const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || process.env.MEDIA_URL;
       const allowedHosts = [
         process.env.MEDIA_DOMAIN,
         mediaUrl ? new URL(mediaUrl).hostname : null,
       ].filter(Boolean) as string[];
-      
-      // 检查协议
+
+      // Check protocol
       if (!allowedProtocols.includes(urlObj.protocol)) {
         return false;
       }
-      
-      // 检查是否为内网地址（SSRF 防护）
+
+      // Check for internal addresses (SSRF protection)
       const hostname = urlObj.hostname.toLowerCase();
       const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
-      const isPrivateIP = 
+      const isPrivateIP =
         hostname.startsWith('192.168.') ||
         hostname.startsWith('10.') ||
-        (hostname.startsWith('172.') && 
-         parseInt(hostname.split('.')[1] || '0') >= 16 && 
+        (hostname.startsWith('172.') &&
+         parseInt(hostname.split('.')[1] || '0') >= 16 &&
          parseInt(hostname.split('.')[1] || '0') <= 31) ||
         hostname.endsWith('.local');
-      
+
       if (isLocalhost || isPrivateIP) {
         console.warn(`[Security] Blocked internal URL: ${url}`);
         return false;
       }
-      
-      // 如果配置了白名单，只允许白名单中的域名
+
+      // If whitelist is configured, only allow whitelisted domains
       if (allowedHosts.length > 0) {
         const isAllowed = allowedHosts.some(allowed => {
           const allowedHostname = allowed.toLowerCase();
@@ -96,7 +167,7 @@ export class PhotoProcessor {
           return false;
         }
       }
-      
+
       return true;
     } catch {
       return false;
@@ -104,21 +175,54 @@ export class PhotoProcessor {
   }
 
   /**
-   * 应用风格预设
-   * @param image Sharp 图像对象
-   * @param presetId 预设 ID（如 "japanese-fresh"）或 null（无风格）
+   * 应用风格预设到图片
+   *
+   * @description
+   * 按照 Gemini 建议的顺序应用风格预设参数，确保后端生成的照片与前端 CSS 预览效果高度一致。
+   *
+   * **处理顺序（关键）：**
+   * 1. modulate (brightness, saturation, hue) - 基础色彩调整
+   * 2. linear (contrast) - 对比度调整
+   * 3. gamma - 伽马校正
+   * 4. tint - 色调叠加
+   *
+   * **注意：** 顺序错误会导致画面色彩断层。必须先执行 modulate（基础色彩），
+   * 再执行 linear（对比度），最后执行 gamma。tint 在最后应用。
+   *
+   * **参数映射说明：**
+   * - brightness: 0.0 - 2.0，默认 1.0（无变化）
+   * - saturation: 0.0 - 2.0，默认 1.0（无变化），0.0 时变成黑白
+   * - hue: 0 - 360 度，默认 0（无变化）
+   *   - 正值：顺时针旋转，趋向暖色（黄/橙）
+   *   - 负值：逆时针旋转，趋向冷色（蓝/紫）
+   *   - 与 CSS hue-rotate() 方向一致
+   * - contrast: -1.0 - 1.0，默认 0.0（无变化）
+   *   - CSS contrast(1.2) 对应 config.contrast: 0.2
+   *   - Sharp 使用 linear(a, b)，其中 a = 1 + contrast, b = 128 * (1 - a)
+   *   - 这确保中间调（128 灰度）不动，只拉伸高光和阴影
+   * - gamma: 0.1 - 3.0，默认 1.0（无变化）
+   * - tint: RGB 色调叠加，用于色温模拟
+   *   - Sharp 的 .tint() 效果较强，如果发现偏色过重，可能需要调整
+   *
+   * **特殊预设处理：**
+   * - high-key-bw: saturation 必须先清零（在 modulate 中处理），再应用高对比度和 gamma
+   *
+   * @param image - Sharp 图像对象
+   * @param presetId - 预设 ID（如 "japanese-fresh"）或 null 表示不应用风格
    * @returns 处理后的 Sharp 图像对象
+   *
+   * @internal
    */
   private applyStylePreset(
     image: sharp.Sharp,
     presetId: string | null | undefined
   ): sharp.Sharp {
-    // 如果未选择预设或选择"无风格"，直接返回原图
+    // Return original image if no preset selected or "none"
     if (!presetId || presetId === 'none') {
       return image;
     }
 
-    // 获取预设配置
+    // Get preset configuration
     const preset = getPresetById(presetId);
     if (!preset) {
       console.warn(`[StylePreset] Unknown preset: ${presetId}, skipping`);
@@ -128,29 +232,67 @@ export class PhotoProcessor {
     const config = preset.config;
     let processedImage = image.clone();
 
-    // 应用 modulate（亮度、饱和度、色相）
-    if (config.brightness !== undefined || 
-        config.saturation !== undefined || 
+    // ========== 步骤 1: Apply modulate (brightness, saturation, hue) ==========
+    // 基础色彩调整，必须在最前面执行
+    // Sharp modulate 需要所有三个参数，使用已定义的值或默认值
+    // 注意：saturation 为 0 时会变成黑白（如 high-key-bw），需要明确传递
+    if (config.brightness !== undefined ||
+        config.saturation !== undefined ||
         config.hue !== undefined) {
+      // 构建 modulate 参数，只包含已定义的参数
+      const modulateParams: {
+        brightness?: number
+        saturation?: number
+        hue?: number
+      } = {}
+      
+      // 只添加已定义的参数
+      if (config.brightness !== undefined) {
+        modulateParams.brightness = config.brightness
+      }
+      if (config.saturation !== undefined) {
+        modulateParams.saturation = config.saturation
+      }
+      if (config.hue !== undefined) {
+        modulateParams.hue = config.hue
+      }
+      
+      // 如果至少有一个参数，调用 modulate
+      // Sharp modulate 需要所有三个参数，所以我们需要提供默认值
+      const finalBrightness = modulateParams.brightness ?? 1.0
+      const finalSaturation = modulateParams.saturation ?? 1.0
+      const finalHue = modulateParams.hue ?? 0
+      
       processedImage = processedImage.modulate({
-        brightness: config.brightness ?? 1.0,
-        saturation: config.saturation ?? 1.0,
-        hue: config.hue ?? 0,
+        brightness: finalBrightness,
+        saturation: finalSaturation,
+        hue: finalHue,
       });
     }
 
-    // 应用对比度
-    // 注意：Sharp 的 TypeScript 类型定义可能不完整，使用类型断言
-    if (config.contrast !== undefined && config.contrast !== 0) {
-      processedImage = (processedImage as any).contrast(config.contrast);
+    // ========== 步骤 2: Apply contrast (linear transformation) ==========
+    // 对比度调整，必须在 modulate 之后、gamma 之前执行
+    // Contrast range: -1.0 (low) to 1.0 (high), default 0.0 (no change)
+    // CSS contrast(1.2) 对应 config.contrast: 0.2
+    // Sharp 使用 linear(a, b) 模拟对比度：
+    //   - a = 1.0 + contrast (factor: 0.0..2.0)
+    //   - b = 128 * (1 - a) (offset: 确保中间调不动)
+    // 这确保中间调（128 灰度）不动，只拉伸高光和阴影，与 Lightroom 思路一致
+    if (config.contrast !== undefined && config.contrast !== 0.0) {
+      const factor = 1.0 + config.contrast; // Convert -1.0..1.0 to 0.0..2.0
+      const offset = 128 * (1 - factor); // 防止画面整体变白或变黑
+      processedImage = processedImage.linear(factor, offset);
     }
 
-    // 应用伽马校正
+    // ========== 步骤 3: Apply gamma correction ==========
+    // 伽马校正，必须在 contrast 之后执行
     if (config.gamma !== undefined && config.gamma !== 1.0) {
       processedImage = processedImage.gamma(config.gamma);
     }
 
-    // 应用色调叠加（用于色温模拟）
+    // ========== 步骤 4: Apply tint (color temperature simulation) ==========
+    // 色调叠加，在最后应用
+    // Sharp 的 .tint() 效果较强，如果发现成片偏色过重，可能需要调整
     if (config.tint) {
       processedImage = processedImage.tint(config.tint);
     }
@@ -158,116 +300,138 @@ export class PhotoProcessor {
     return processedImage;
   }
 
+  /**
+   * 处理图片
+   *
+   * @description
+   * 执行以下操作：
+   * 1. 根据 EXIF 或手动角度旋转图片
+   * 2. 应用风格预设
+   * 3. 生成 BlurHash
+   * 4. 生成缩略图（400px）
+   * 5. 生成预览图（1920px，带水印）
+   * 6. 提取并清理 EXIF 数据
+   *
+   * @param watermarkConfig - 水印配置
+   * @param manualRotation - 手动旋转角度（可选，覆盖 EXIF）
+   * @param stylePresetId - 风格预设 ID（可选）
+   * @returns 处理结果对象
+   *
+   * @example
+   * ```typescript
+   * const result = await processor.process(
+   *   { enabled: true, text: '© My Gallery', opacity: 0.5, position: 'bottom-right' },
+   *   null,
+   *   'japanese-fresh'
+   * )
+   * ```
+   */
   async process(
-    watermarkConfig?: WatermarkConfig, 
+    watermarkConfig?: WatermarkConfig,
     manualRotation?: number | null,
     stylePresetId?: string | null
   ): Promise<ProcessedResult> {
-    // 先获取原始 metadata（用于提取 EXIF）
+    // Get original metadata first (for EXIF extraction)
     const originalMetadata = await this.image.metadata();
-    
-    // 1. 提取 EXIF（剥离敏感信息）
-    let exif = {};
+
+    // 1. Extract EXIF (strip sensitive info)
+    let exif: unknown = {};
     if (originalMetadata.exif) {
       try {
         const rawExif = exifReader(originalMetadata.exif);
-        // 剥离 GPS 地理位置信息，防止隐私泄露
+        // Strip GPS location info to prevent privacy leakage
         exif = this.sanitizeExif(rawExif);
       } catch (e) {
         console.warn('Failed to parse EXIF:', e);
       }
     }
 
-    // 应用旋转：如果有手动旋转角度，使用手动角度；否则使用 EXIF orientation 自动旋转
+    // Apply rotation: use manual rotation if provided; otherwise use EXIF orientation
     let rotatedImage: sharp.Sharp;
     if (manualRotation !== null && manualRotation !== undefined) {
-      // 手动旋转：先应用 EXIF orientation，再应用手动旋转
+      // Manual rotation: apply EXIF orientation first, then manual rotation
       rotatedImage = this.image.clone().rotate().rotate(manualRotation);
     } else {
-      // 自动旋转：只根据 EXIF orientation
+      // Automatic rotation: only based on EXIF orientation
       rotatedImage = this.image.clone().rotate();
     }
-    
-    // 应用风格预设（在旋转之后，水印之前）
+
+    // Apply style preset (after rotation, before watermark)
     rotatedImage = this.applyStylePreset(rotatedImage, stylePresetId);
-    
+
     const metadata = await rotatedImage.metadata();
 
-    // 2. 并行生成：BlurHash + 缩略图（优化性能）
-    // 优化：BlurHash 使用已旋转的图像，避免重复旋转
-    // 支持通过环境变量配置缩略图标准，默认 400px（向后兼容）
-    // 重要：每个并行任务都使用独立的 clone()，确保完全隔离，避免图片数据混乱
-    // 防御性措施：在并行处理前创建完全独立的 Sharp 实例，防止并发时的数据共享问题
+    // 2. Parallel generation: BlurHash + Thumbnail (Performance optimization)
+    // Optimization: BlurHash uses rotated image to avoid repeated rotation
+    // Support thumbnail standard via environment variable, default 400px (backward compatible)
+    // IMPORTANT: Each parallel task uses independent clone() to ensure full isolation
+    // Defensive measure: Create completely independent Sharp instances before parallel processing
     const thumbSize = parseInt(process.env.THUMB_MAX_SIZE || '400', 10);
-    
-    // 为每个并行任务创建完全独立的 Sharp 实例
-    // 这确保了即使在 Sharp 内部实现有并发问题的情况下，也能保证数据隔离
+
+    // Create completely independent Sharp instances for each parallel task
+    // This ensures data isolation even if Sharp has internal concurrency issues
     const thumbImage = rotatedImage.clone();
     const blurHashImage = rotatedImage.clone();
-    
+
     const [blurHash, thumbBuffer] = await Promise.all([
-      // 生成 BlurHash（基于已旋转的图片，避免重复旋转）
-      // 使用独立的 Sharp 实例确保数据隔离
+      // Generate BlurHash (based on rotated image)
+      // Use independent Sharp instance for isolation
       this.generateBlurHashFromRotated(blurHashImage),
-      // 生成缩略图 - 自动根据 EXIF orientation 旋转
-      // 使用独立的 Sharp 实例确保数据隔离
+      // Generate thumbnail - auto-rotate based on EXIF orientation
+      // Use independent Sharp instance for isolation
       thumbImage
         .resize(thumbSize, null, { withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer()
     ]);
 
-    // 4. 生成预览图 - 自动根据 EXIF orientation 旋转
-    // 优化：直接从 metadata 获取尺寸，避免重复编码/解码
+    // 4. Generate Preview - auto-rotate based on EXIF orientation
+    // Optimization: Get dimensions directly from metadata to avoid repeated decode
     const { width: originalWidth, height: originalHeight } = metadata;
-    
-    // 计算预览图尺寸（保持宽高比）
-    // 支持通过环境变量配置预览图标准，默认 1920px（向后兼容）
+
+    // Calculate preview dimensions (maintain aspect ratio)
+    // Support preview standard via environment variable, default 1920px (backward compatible)
     const maxPreviewSize = parseInt(process.env.PREVIEW_MAX_SIZE || '1920', 10);
     let previewWidth = originalWidth || maxPreviewSize;
     let previewHeight = originalHeight || maxPreviewSize;
-    
+
     if (previewWidth > maxPreviewSize || previewHeight > maxPreviewSize) {
       const ratio = Math.min(maxPreviewSize / previewWidth, maxPreviewSize / previewHeight);
       previewWidth = Math.floor(previewWidth * ratio);
       previewHeight = Math.floor(previewHeight * ratio);
     }
-    
-    // 优化：复用 rotatedImage，减少 clone 操作
-    // 注意：previewPipeline 会在后面被修改（添加水印），所以需要 clone
+
+    // Optimization: Reuse rotatedImage, reduce clone operations
+    // Note: previewPipeline will be modified later (watermark addition), so clone is needed
     let previewPipeline = rotatedImage
       .clone()
       .resize(maxPreviewSize, null, { withoutEnlargement: true });
 
-    // 添加水印
+    // Add Watermark
     if (watermarkConfig?.enabled) {
       const watermarkStartTime = Date.now();
       const width = previewWidth;
       const height = previewHeight;
-      
-      // 边界检查：确保图片尺寸有效
+
+      // Boundary check: ensure valid image dimensions
       if (!width || !height || width <= 0 || height <= 0) {
         console.warn(`[Watermark] Invalid image dimensions: ${width}x${height}, skipping watermark`);
       } else {
-        console.log(`[Watermark] Processing watermarks for image ${width}x${height}`);
-        
         const composites: Array<{ input: Buffer; gravity: string }> = [];
 
-        // 支持多个水印（新格式）
+        // Support multiple watermarks (new format)
         if (watermarkConfig.watermarks && Array.isArray(watermarkConfig.watermarks)) {
-          const enabledCount = watermarkConfig.watermarks.filter(w => w.enabled !== false).length;
-          console.log(`[Watermark] Found ${watermarkConfig.watermarks.length} watermarks, ${enabledCount} enabled`);
-          
-          // 并行处理多个水印（性能优化）
+
+          // Parallel processing of multiple watermarks (performance optimization)
           const enabledWatermarks = watermarkConfig.watermarks.filter(w => w.enabled !== false);
           const watermarkPromises = enabledWatermarks.map(watermark =>
             this.createWatermarkBuffer(watermark, width, height)
           );
-          
-          // 并行创建所有水印 buffer
+
+          // Create all watermark buffers in parallel
           const watermarkBuffers = await Promise.all(watermarkPromises);
-          
-          // 构建 composites 数组
+
+          // Build composites array
           for (let i = 0; i < enabledWatermarks.length; i++) {
             const watermarkBuffer = watermarkBuffers[i];
             if (watermarkBuffer) {
@@ -279,13 +443,13 @@ export class PhotoProcessor {
             }
           }
         } else {
-          // 兼容旧格式：单个水印
+          // Legacy format compatibility: Single watermark
           const singleWatermark: SingleWatermark = {
             type: watermarkConfig.type || 'text',
             text: watermarkConfig.text,
             logoUrl: watermarkConfig.logoUrl,
             opacity: watermarkConfig.opacity || 0.5,
-            position: watermarkConfig.position || 'center',
+            position: (watermarkConfig.position as SingleWatermark['position']) || 'center',
           };
 
           const watermarkBuffer = await this.createWatermarkBuffer(
@@ -303,14 +467,12 @@ export class PhotoProcessor {
           }
         }
 
-        // 应用所有水印
+        // Apply all watermarks
         if (composites.length > 0) {
           previewPipeline = previewPipeline.composite(composites);
         }
-        
+
         const watermarkDuration = Date.now() - watermarkStartTime;
-        console.log(`[Watermark] Processing completed in ${watermarkDuration}ms`);
-        
         if (watermarkDuration > 5000) {
           console.warn(`[Watermark] Slow watermark processing: ${watermarkDuration}ms`);
         }
@@ -320,9 +482,9 @@ export class PhotoProcessor {
     const previewBuffer = await previewPipeline
       .jpeg({ quality: 85 })
       .toBuffer();
-    
+
     return {
-      metadata, // 已经是旋转后的 metadata，包含正确的宽高
+      metadata, // Already rotated metadata, contains correct dimensions
       exif,
       blurHash,
       thumbBuffer,
@@ -332,6 +494,17 @@ export class PhotoProcessor {
 
   /**
    * 创建单个水印的 Buffer
+   *
+   * @description
+   * - 文本水印：生成 SVG 文本
+   * - Logo 水印：从 URL 下载并缩放，然后嵌入 SVG
+   *
+   * @param watermark - 水印配置
+   * @param imageWidth - 基础图片宽度
+   * @param imageHeight - 基础图片高度
+   * @returns SVG Buffer，失败返回 null
+   *
+   * @internal
    */
   private async createWatermarkBuffer(
     watermark: SingleWatermark,
@@ -339,11 +512,11 @@ export class PhotoProcessor {
     imageHeight: number
   ): Promise<Buffer | null> {
     if (watermark.type === 'text' && watermark.text) {
-      // 优化字体大小计算：使用面积而非最小边，避免超宽/超高图片字体过小
+      // Optimization: Calculate font size based on area rather than min dimension
       const baseSize = Math.sqrt(imageWidth * imageHeight);
       const fontSize = watermark.size || Math.max(12, Math.min(72, Math.floor(baseSize * 0.01)));
       const { x, y, anchor, baseline } = this.getTextPosition(watermark.position, imageWidth, imageHeight, watermark.margin);
-      
+
       const svgText = `
         <svg width="${imageWidth}" height="${imageHeight}" xmlns="http://www.w3.org/2000/svg">
           <style>
@@ -354,18 +527,18 @@ export class PhotoProcessor {
       `;
       return Buffer.from(svgText);
     } else if (watermark.type === 'logo' && watermark.logoUrl) {
-      // 安全验证：检查 URL 是否安全
+      // Security check: Validate URL
       if (!this.isValidLogoUrl(watermark.logoUrl)) {
         console.error(`[Watermark] Invalid or unsafe logo URL: ${watermark.logoUrl}`);
         return null;
       }
-      
+
       try {
-        // 设置超时和大小限制（防止 SSRF 和内存溢出）
+        // Set timeout and size limit (Prevent SSRF and OOM)
         const controller = new AbortController();
-        const timeoutMs = 10000; // 10秒超时
+        const timeoutMs = 10000; // 10 seconds timeout
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-        const maxSize = 10 * 1024 * 1024; // 10MB 限制
+        const maxSize = 10 * 1024 * 1024; // 10MB limit
 
         try {
           const response = await fetch(watermark.logoUrl, {
@@ -374,36 +547,36 @@ export class PhotoProcessor {
               'User-Agent': 'PIS-Watermark/1.0',
             },
           });
-          
+
           clearTimeout(timeoutId);
-          
+
           if (!response.ok) {
             throw new Error(`Failed to fetch logo: ${response.status} ${response.statusText}`);
           }
-          
-          // 检查 Content-Length
+
+          // Check Content-Length
           const contentLength = response.headers.get('content-length');
           if (contentLength && parseInt(contentLength) > maxSize) {
             throw new Error(`Logo file too large: ${contentLength} bytes (max: ${maxSize} bytes)`);
           }
-          
+
           const logoBuffer = await response.arrayBuffer();
-          
-          // 再次检查实际大小
+
+          // Double check actual size
           if (logoBuffer.byteLength > maxSize) {
             throw new Error(`Logo file too large: ${logoBuffer.byteLength} bytes (max: ${maxSize} bytes)`);
           }
-          
+
           const logoSize = watermark.size || Math.floor(Math.min(imageWidth, imageHeight) * 0.15);
 
-          // 优化：一次性获取 buffer 和 metadata，避免重复创建 Sharp 实例
+          // Optimization: Get buffer and metadata in one go, avoid repeated Sharp instances
           const resizedLogoResult = await sharp(Buffer.from(logoBuffer))
             .resize(logoSize, logoSize, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
             .toBuffer({ resolveWithObject: true });
 
           const logoW = resizedLogoResult.info.width;
           const logoH = resizedLogoResult.info.height;
-          
+
           if (logoW && logoH) {
             const { x, y } = this.getImagePosition(watermark.position, imageWidth, imageHeight, logoW, logoH, watermark.margin);
             const logoBase64 = resizedLogoResult.data.toString('base64');
@@ -432,7 +605,7 @@ export class PhotoProcessor {
         }
       } catch (e: any) {
         console.error(`[Watermark] Failed to load logo from ${watermark.logoUrl}:`, e.message || e);
-        // 不中断整个处理流程，只跳过该水印
+        // Do not interrupt process, just skip this watermark
       }
     }
     return null;
@@ -440,6 +613,11 @@ export class PhotoProcessor {
 
   /**
    * 将位置字符串转换为 Sharp gravity
+   *
+   * @param position - 位置字符串（如 'top-left'）
+   * @returns Sharp gravity 字符串
+   *
+   * @internal
    */
   private positionToGravity(position: string): string {
     const positionMap: Record<string, string> = {
@@ -452,7 +630,7 @@ export class PhotoProcessor {
       'bottom-left': 'southwest',
       'bottom-center': 'south',
       'bottom-right': 'southeast',
-      // 兼容旧格式
+      // Legacy format compatibility
       'northwest': 'northwest',
       'northeast': 'northeast',
       'southwest': 'southwest',
@@ -462,7 +640,15 @@ export class PhotoProcessor {
   }
 
   /**
-   * 获取文字水印的位置坐标
+   * 计算文本水印的坐标
+   *
+   * @param position - 位置字符串
+   * @param width - 图片宽度
+   * @param height - 图片高度
+   * @param customMargin - 自定义边距百分比
+   * @returns 坐标和文本锚点属性
+   *
+   * @internal
    */
   private getTextPosition(
     position: string,
@@ -470,7 +656,7 @@ export class PhotoProcessor {
     height: number,
     customMargin?: number
   ): { x: string; y: string; anchor: string; baseline: string } {
-    const marginPercent = customMargin !== undefined ? customMargin / 100 : 0.05; // 自定义边距或默认5%
+    const marginPercent = customMargin !== undefined ? customMargin / 100 : 0.05; // Custom or default 5%
     const margin = Math.min(width, height) * marginPercent;
 
     const positions: Record<string, { x: string; y: string; anchor: string; baseline: string }> = {
@@ -489,7 +675,20 @@ export class PhotoProcessor {
   }
 
   /**
-   * 获取图片水印的位置坐标（带边界检查）
+   * 计算图片水印的坐标（带边界检查）
+   *
+   * @description
+   * 确保 Logo 不会超出图片边界
+   *
+   * @param position - 位置字符串
+   * @param imageWidth - 图片宽度
+   * @param imageHeight - 图片高度
+   * @param logoWidth - Logo 宽度
+   * @param logoHeight - Logo 高度
+   * @param customMargin - 自定义边距百分比
+   * @returns 坐标 {x, y}
+   *
+   * @internal
    */
   private getImagePosition(
     position: string,
@@ -499,10 +698,10 @@ export class PhotoProcessor {
     logoHeight: number,
     customMargin?: number
   ): { x: number; y: number } {
-    const marginPercent = customMargin !== undefined ? customMargin / 100 : 0.05; // 自定义边距或默认5%
+    const marginPercent = customMargin !== undefined ? customMargin / 100 : 0.05; // Custom or default 5%
     const margin = Math.min(imageWidth, imageHeight) * marginPercent;
-    
-    // 确保 logo 不会超出图片边界
+
+    // Ensure logo doesn't exceed image boundaries
     const maxX = Math.max(0, imageWidth - logoWidth);
     const maxY = Math.max(0, imageHeight - logoHeight);
 
@@ -519,8 +718,8 @@ export class PhotoProcessor {
     };
 
     const pos = positions[position] || positions['center'];
-    
-    // 最终边界检查，确保坐标在有效范围内
+
+    // Final boundary check
     return {
       x: Math.max(0, Math.min(pos.x, maxX)),
       y: Math.max(0, Math.min(pos.y, maxY)),
@@ -529,6 +728,11 @@ export class PhotoProcessor {
 
   /**
    * 转义 XML 特殊字符
+   *
+   * @param text - 输入文本
+   * @returns 转义后的文本
+   *
+   * @internal
    */
   private escapeXml(text: string): string {
     return text
@@ -536,11 +740,19 @@ export class PhotoProcessor {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
+      .replace(/'/g, '&apos;')
   }
 
   /**
-   * 清理 EXIF 数据，移除敏感信息（GPS 地理位置）
+   * 清理 EXIF 数据，移除敏感信息（GPS）
+   *
+   * @description
+   * 移除 GPS 位置信息以保护隐私
+   *
+   * @param {any} rawExif - 原始 EXIF 对象
+   * @returns {any} 清理后的 EXIF 对象
+   *
+   * @internal
    */
   private sanitizeExif(rawExif: any): any {
     if (!rawExif || typeof rawExif !== 'object') {
@@ -549,34 +761,33 @@ export class PhotoProcessor {
 
     const sanitized: any = {};
 
-    // 保留基本 EXIF 信息
+    // Keep basic EXIF info
     if (rawExif.exif) {
       sanitized.exif = { ...rawExif.exif };
-      // 移除可能包含位置信息的字段
+      // Remove fields that might contain location info
       delete sanitized.exif.GPSInfo;
       delete sanitized.exif.GPSVersionID;
     }
 
-    // 保留图像信息
+    // Keep image info
     if (rawExif.image) {
       sanitized.image = rawExif.image;
     }
 
-    // 保留相机信息
+    // Keep camera info
     if (rawExif.makernote) {
       sanitized.makernote = rawExif.makernote;
     }
 
-    // 明确移除 GPS 信息
+    // Explicitly remove GPS info
     if (rawExif.gps) {
-      // 不保留 GPS 信息
-      console.log('[Security] Removed GPS location data from EXIF');
+      // Do not keep GPS info
     }
 
-    // 移除所有包含 GPS 的字段
+    // Remove all fields containing GPS
     Object.keys(rawExif).forEach((key) => {
       if (key.toLowerCase().includes('gps') || key.toLowerCase().includes('location')) {
-        // 跳过 GPS 相关字段
+        // Skip GPS related fields
         return;
       }
       if (!sanitized[key]) {
@@ -588,7 +799,15 @@ export class PhotoProcessor {
   }
 
   /**
-   * 从已旋转的图像生成 BlurHash（性能优化：避免重复旋转）
+   * 从已旋转的图像生成 BlurHash
+   *
+   * @description
+   * 性能优化：避免重复旋转操作
+   *
+   * @param rotatedImage - 已旋转的 Sharp 图像对象
+   * @returns BlurHash 字符串
+   *
+   * @internal
    */
   private async generateBlurHashFromRotated(rotatedImage: sharp.Sharp): Promise<string> {
     const { data, info } = await rotatedImage
@@ -596,14 +815,20 @@ export class PhotoProcessor {
       .raw()
       .ensureAlpha()
       .resize(32, 32, { fit: 'inside' })
-      .toBuffer({ resolveWithObject: true });
+      .toBuffer({ resolveWithObject: true })
 
-    return encode(new Uint8ClampedArray(data), info.width, info.height, 4, 4);
+    return encode(new Uint8ClampedArray(data), info.width, info.height, 4, 4)
   }
 
   /**
-   * 生成 BlurHash（旧方法，保留用于兼容）
+   * 生成 BlurHash（旧方法）
+   *
    * @deprecated 使用 generateBlurHashFromRotated 代替，性能更好
+   *
+   * @param manualRotation - 手动旋转角度（可选）
+   * @returns BlurHash 字符串
+   *
+   * @internal
    */
   private async generateBlurHash(manualRotation?: number | null): Promise<string> {
     let image = this.image.clone();

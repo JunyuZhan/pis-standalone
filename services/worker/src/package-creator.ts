@@ -1,6 +1,6 @@
 import archiver from 'archiver';
 import { downloadFile } from './lib/storage/index.js';
-import { PhotoProcessor } from './processor.js';
+import { PhotoProcessor, type SingleWatermark } from './processor.js';
 
 export interface PackageOptions {
   photos: Array<{
@@ -13,14 +13,7 @@ export interface PackageOptions {
   watermarkConfig?: {
     enabled: boolean;
     type?: 'text' | 'logo';
-    watermarks?: Array<{
-      type: 'text' | 'logo';
-      text?: string;
-      logoUrl?: string;
-      opacity: number;
-      position: string;
-      enabled?: boolean;
-    }>;
+    watermarks?: Array<SingleWatermark>;
     [key: string]: any;
   };
   includeWatermarked: boolean;
@@ -102,13 +95,13 @@ export class PackageCreator {
                         } catch {
                           // 如果预览图不存在，重新处理添加水印
                           const processor = new PhotoProcessor(originalBuffer);
-                          const result = await processor.process(watermarkConfig);
+                          const result = await processor.process(watermarkConfig as any);
                           watermarkedBuffer = result.previewBuffer;
                         }
                       } else {
                         // 重新处理添加水印
                         const processor = new PhotoProcessor(originalBuffer);
-                        const result = await processor.process(watermarkConfig);
+                        const result = await processor.process(watermarkConfig as any);
                         watermarkedBuffer = result.previewBuffer;
                       }
                     } else {
@@ -136,8 +129,6 @@ export class PackageCreator {
               await new Promise(resolve => setTimeout(resolve, 100));
             }
           }
-          
-          console.log(`[PackageCreator] Processed ${processedCount} photos, ${failedCount} failed`);
           
           if (processedCount === 0) {
             throw new Error('No photos were successfully processed');

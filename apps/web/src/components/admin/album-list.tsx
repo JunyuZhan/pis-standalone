@@ -126,9 +126,11 @@ export function AlbumList({ initialAlbums }: AlbumListProps) {
           }
 
           const result = await response.json()
+          // API 返回格式是 { data: {...} }
+          const data = result.data || result
           showSuccess('相册已复制')
           router.refresh()
-          router.push(`/admin/albums/${result.id}`)
+          router.push(`/admin/albums/${data.id}`)
         } catch (error) {
           console.error(error)
           handleApiError(error, '复制失败，请重试')

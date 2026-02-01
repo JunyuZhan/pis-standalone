@@ -13,17 +13,9 @@ Error: unable to get local issuer certificate (UNABLE_TO_GET_ISSUER_CERT_LOCALLY
 - Supabase API 调用失败
 - 所有 HTTPS 请求失败
 
-## 快速修复（推荐）
+## 快速修复
 
-### 方法 1: 使用修复脚本启动开发服务器
-
-```bash
-pnpm dev:ssl-fix
-```
-
-这个脚本会自动检测并配置 SSL 证书。
-
-### 方法 2: 永久修复（推荐用于开发环境）
+### 方法 1: 永久修复（推荐用于开发环境）
 
 将以下内容添加到 `~/.zshrc` 或 `~/.bash_profile`：
 
@@ -40,7 +32,7 @@ source ~/.zshrc  # 或 source ~/.bash_profile
 
 **注意**: `NODE_TLS_REJECT_UNAUTHORIZED=0` 会禁用 SSL 验证，仅适用于开发环境。生产环境请使用正确的证书配置。
 
-### 方法 3: 使用系统证书（更安全）
+### 方法 2: 使用系统证书（更安全）
 
 如果系统有正确的 CA 证书，可以设置：
 
@@ -51,16 +43,6 @@ export NODE_EXTRA_CA_CERTS="/etc/ssl/cert.pem"
 # 或 Homebrew 证书
 export NODE_EXTRA_CA_CERTS="$(brew --prefix)/etc/ca-certificates/cert.pem"
 ```
-
-## 诊断工具
-
-运行诊断脚本：
-
-```bash
-pnpm fix-ssl
-```
-
-这会检测你的系统配置并提供建议。
 
 ## 常见场景
 

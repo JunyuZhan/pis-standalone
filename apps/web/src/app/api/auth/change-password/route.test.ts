@@ -34,7 +34,8 @@ describe('POST /api/auth/change-password', () => {
     vi.clearAllMocks()
     
     const { getCurrentUser } = await import('@/lib/auth/api-helpers')
-    const { getAuthDatabase, hashPassword, verifyPassword } = await import('@/lib/auth')
+    const { getAuthDatabase } = await import('@/lib/auth')
+    const { hashPassword, verifyPassword } = await import('@/lib/auth/password')
     
     mockGetCurrentUser = vi.mocked(getCurrentUser)
     mockGetAuthDatabase = vi.mocked(getAuthDatabase)

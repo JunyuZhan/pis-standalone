@@ -10,7 +10,7 @@
 
 ### 设计原则
 
-1. **统一入口**：所有外部请求通过 Nginx（8080 端口）
+1. **统一入口**：所有外部请求通过 Next.js Web 容器（8081 端口）
 2. **内部通信**：容器之间通过 Docker 内部网络（`pis-network`）通信
 3. **避免多路径**：不对外暴露多个端口，统一管理
 
@@ -25,7 +25,14 @@ Internet
    ↓
 [frpc/ddnsto] 内网穿透
    ↓
-[8080] Nginx (唯一对外端口)
+[8081] Web (Next.js，唯一对外端口)
+   ↓
+Next.js API Routes (统一入口)
+   ├──→ / → Next.js 前端应用
+   ├──→ /api/* → Next.js API
+   ├──→ /media/* → 代理到 pis-minio:9000
+   ├──→ /minio-console/* → 代理到 pis-minio:9001
+   └──→ /api/worker/* → 代理到 pis-worker:3001
    ↓
 Docker 内部网络 (pis-network)
 ```
@@ -33,14 +40,10 @@ Docker 内部网络 (pis-network)
 ### 容器间通信（内部网络）
 
 ```
-Nginx (8080)
-   ├──→ Web (3000) - 内部网络: pis-web:3000
-   ├──→ MinIO (9000) - 内部网络: pis-minio:9000
-   └──→ Worker (3001) - 内部网络: pis-worker:3001
-
-Web (3000)
+Web (8081，统一入口)
    ├──→ PostgreSQL (5432) - 内部网络: postgres:5432
-   ├──→ Worker (3001) - 内部网络: worker:3001
+   ├──→ Worker (3001) - 内部网络: worker:3001 (通过 API Route 代理)
+   ├──→ MinIO (9000) - 内部网络: minio:9000 (通过 API Route 代理)
    └──→ Redis (6379) - 内部网络: redis:6379
 
 Worker (3001)
@@ -53,22 +56,24 @@ Worker (3001)
 
 ## 🔍 详细分析
 
-### 1. 统一入口（Nginx）
+### 1. 统一入口（Next.js Web 容器）
 
 **对外暴露**：
-- ✅ **唯一端口**：8080（HTTP）
+- ✅ **唯一端口**：8081（HTTP）
 - ✅ **HTTPS**：由内网穿透处理
 
-**内部代理**：
-- ✅ `/` → `pis-web:3000`（Web 前端）
-- ✅ `/api/` → `pis-web:3000`（Web API Routes）
-- ✅ `/media/` → `pis-minio:9000`（MinIO 媒体文件）
-- ✅ `/api/worker/` → `pis-web:3000` → `pis-worker:3001`（Worker API，通过 Web 代理）
+**内部代理**（通过 Next.js API Routes）：
+- ✅ `/` → Next.js 前端应用
+- ✅ `/api/*` → Next.js API Routes
+- ✅ `/media/*` → 代理到 `pis-minio:9000`（MinIO 媒体文件）
+- ✅ `/minio-console/*` → 代理到 `pis-minio:9001`（MinIO Console）
+- ✅ `/api/worker/*` → 代理到 `pis-worker:3001`（Worker API）
 
 **优点**：
 - ✅ 统一管理所有路由
 - ✅ 便于监控和日志
 - ✅ 可以统一添加安全头、CORS 等
+- ✅ 减少容器数量（6 个容器）
 
 ---
 
@@ -163,25 +168,22 @@ worker:
 
 | 容器 | 对外端口 | 内部端口 | 说明 |
 |------|---------|---------|------|
-| **Nginx** | 8080 | 80 | ✅ **唯一对外端口** |
-| Web | ❌ 无 | 3000 | ✅ 仅内部访问 |
-| Worker | ❌ 无 | 3001 | ✅ 仅内部访问 |
-| MinIO | ❌ 无 | 9000 | ✅ 仅内部访问 |
-| PostgreSQL | ⚠️ 127.0.0.1:5432 | 5432 | ⚠️ 仅本地调试（可选） |
-| Redis | ⚠️ 127.0.0.1:6379 | 6379 | ⚠️ 仅本地调试（可选） |
+| **Web** | 8081 | 3000 | ✅ **唯一对外端口**（集成代理功能） |
+| Worker | ❌ 无 | 3001 | ✅ 仅内部访问（通过 Next.js 代理） |
+| MinIO | ❌ 无 | 9000/9001 | ✅ 仅内部访问（通过 Next.js 代理） |
+| PostgreSQL | ❌ 无 | 5432 | ✅ 仅内部访问 |
+| Redis | ❌ 无 | 6379 | ✅ 仅内部访问 |
 
 ### 容器间通信（内部网络）
 
 | 服务 | 目标服务 | 使用地址 | 说明 |
 |------|---------|---------|------|
 | Web | PostgreSQL | `postgres:5432` | ✅ 容器名，内部网络 |
-| Web | Worker | `worker:3001` | ✅ 容器名，内部网络 |
+| Web | Worker | `worker:3001` | ✅ 容器名，内部网络（通过 API Route 代理） |
 | Web | Redis | `redis:6379` | ✅ 容器名，内部网络 |
 | Worker | PostgreSQL | `postgres:5432` | ✅ 容器名，内部网络 |
 | Worker | MinIO | `minio:9000` | ✅ 容器名，内部网络 |
 | Worker | Redis | `redis:6379` | ✅ 容器名，内部网络 |
-| Nginx | Web | `pis-web:3000` | ✅ 容器名，内部网络 |
-| Nginx | MinIO | `pis-minio:9000` | ✅ 容器名，内部网络 |
 
 ---
 
@@ -225,20 +227,16 @@ networks:
     name: pis-network
 
 services:
-  # 唯一对外暴露的容器
-  nginx:
-    ports:
-      - "8080:80"    # 唯一对外端口
-    networks:
-      - pis-network
-
-  # 仅内部访问的容器
+  # 唯一对外暴露的容器（集成代理功能）
   web:
-    # 无 ports 配置
+    ports:
+      - "8081:3000"    # 唯一对外端口
     environment:
       - DATABASE_HOST=postgres      # 内部网络
       - DATABASE_PORT=5432          # 内部端口
       - WORKER_URL=http://worker:3001  # 内部网络
+      - MINIO_ENDPOINT_HOST=minio   # 内部网络（用于代理）
+      - MINIO_ENDPOINT_PORT=9000    # 内部端口
     networks:
       - pis-network
 
@@ -274,7 +272,8 @@ services:
 ### ✅ 正确设计
 
 1. **统一入口**
-   - ✅ 所有外部请求 → Nginx (8080)
+   - ✅ 所有外部请求 → Next.js Web 容器 (8081)
+   - ✅ 通过 Next.js API Routes 统一代理
    - ✅ 不直接暴露其他服务端口
 
 2. **内部通信**
@@ -308,14 +307,17 @@ services:
 ```
 Internet
    ↓
-[8080] Nginx (唯一入口)
-   ├──→ Web (内部: pis-web:3000)
-   ├──→ MinIO (内部: pis-minio:9000)
-   └──→ Worker (内部: pis-worker:3001，通过 Web 代理)
+[8081] Web (Next.js，唯一入口)
+   ├──→ / → Next.js 前端应用
+   ├──→ /api/* → Next.js API Routes
+   ├──→ /media/* → 代理到 pis-minio:9000
+   ├──→ /minio-console/* → 代理到 pis-minio:9001
+   └──→ /api/worker/* → 代理到 pis-worker:3001
 
 Web (内部通信)
    ├──→ PostgreSQL (内部: postgres:5432)
-   ├──→ Worker (内部: worker:3001)
+   ├──→ Worker (内部: worker:3001，通过 API Route 代理)
+   ├──→ MinIO (内部: minio:9000，通过 API Route 代理)
    └──→ Redis (内部: redis:6379)
 
 Worker (内部通信)
@@ -325,10 +327,11 @@ Worker (内部通信)
 ```
 
 **优点**：
-- ✅ 统一入口
-- ✅ 内部通信
-- ✅ 避免多路径
-- ✅ 安全性高
+- ✅ 统一入口（Next.js Web 容器）
+- ✅ 内部通信（Docker 内部网络）
+- ✅ 避免多路径（只暴露一个端口）
+- ✅ 安全性高（最小攻击面）
+- ✅ 容器数量少（6 个容器）
 
 ### ❌ 错误架构（多路径）
 
@@ -355,12 +358,13 @@ Web
 **你的理解完全正确！** ✅
 
 **设计原则**：
-1. ✅ **统一入口**：所有外部请求通过 Nginx (8080)
+1. ✅ **统一入口**：所有外部请求通过 Next.js Web 容器 (8081)
 2. ✅ **内部通信**：容器之间通过 Docker 内部网络通信
 3. ✅ **避免多路径**：不对外暴露多个端口
 
 **当前架构已正确实现**：
-- ✅ Nginx 是唯一对外端口（8080）
+- ✅ Web 容器是唯一对外端口（8081）
+- ✅ 所有服务通过 Next.js API Routes 统一代理
 - ✅ 容器间使用容器名通信（`postgres`, `minio`, `worker`, `redis`）
 - ✅ 通过 Docker 内部网络（`pis-network`）
 - ✅ 不通过外部端口

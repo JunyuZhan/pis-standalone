@@ -6,6 +6,7 @@
 
 import { createAdminClient } from '@/lib/database'
 import { v4 as uuidv4 } from 'uuid'
+import { generateAlbumSlug } from '@/lib/utils'
 
 export interface TestAlbum {
   id: string
@@ -30,6 +31,7 @@ export async function createTestAlbum(overrides: Partial<TestAlbum> = {}): Promi
   
   const albumData = {
     title: overrides.title || `Test Album ${Date.now()}`,
+    slug: generateAlbumSlug(), // 生成唯一 slug
     description: overrides.description || 'Integration test album',
     is_public: overrides.is_public ?? false,
   }
@@ -40,7 +42,7 @@ export async function createTestAlbum(overrides: Partial<TestAlbum> = {}): Promi
     throw new Error(`Failed to create test album: ${error?.message}`)
   }
   
-  return album[0] as TestAlbum
+  return album[0] as unknown as TestAlbum
 }
 
 /**

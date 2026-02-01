@@ -215,6 +215,18 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updateData.location = validatedData.location?.trim() || null
     }
 
+    // 先检查相册是否存在（避免 deleted_at: null 在 update 方法中无法正确处理）
+    const existingAlbum = await db
+      .from('albums')
+      .select('id')
+      .eq('id', id)
+      .is('deleted_at', null)
+      .single()
+
+    if (existingAlbum.error || !existingAlbum.data) {
+      return ApiError.notFound('相册不存在')
+    }
+
     // 同步照片计数（确保计数准确，排除已删除的）
     // 获取实际照片数量
     const photoCountResult = await db
@@ -230,11 +242,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updateData.photo_count = actualPhotoCount
     }
 
-    // 执行更新
+    // 执行更新（只使用 id 作为条件，因为已经确认相册存在且未删除）
     // 注意：水印配置变更后，只对新上传的照片生效
     // 已上传的照片不会被重新处理，避免数据库错误和性能问题
     // 水印配置会在照片上传时由 Worker 读取并应用
-    const result = await db.update('albums', updateData, { id, deleted_at: null })
+    const result = await db.update('albums', updateData, { id })
 
     if (result.error) {
       return handleError(result.error, '更新相册失败')
@@ -242,6 +254,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     const album = result.data && result.data.length > 0 ? result.data[0] : null
     if (!album) {
+      // 如果更新后查询不到，可能是并发删除，返回 404
       return ApiError.notFound('相册不存在')
     }
 

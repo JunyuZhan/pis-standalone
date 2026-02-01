@@ -25,9 +25,10 @@ const PhotoLightbox = dynamic(() => import('@/components/album/lightbox').then(m
 interface AlbumDetailClientProps {
   album: Album
   initialPhotos: Photo[]
+  mediaUrl?: string // 从服务器端传递，避免 hydration mismatch
 }
 
-export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientProps) {
+export function AlbumDetailClient({ album, initialPhotos, mediaUrl: serverMediaUrl }: AlbumDetailClientProps) {
   const router = useRouter()
   const [photos, setPhotos] = useState(initialPhotos)
   const [showUploader, setShowUploader] = useState(false)
@@ -55,21 +56,109 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // 当 initialPhotos 更新时（例如 router.refresh() 后），同步更新本地 state
+  // 但保留正在处理中的照片状态，避免闪烁
   useEffect(() => {
-    setPhotos(initialPhotos)
+    setPhotos((prevPhotos) => {
+      // 如果有正在处理中的照片，合并新旧照片列表
+      const hasProcessing = prevPhotos.some(p => p.status === 'pending' || p.status === 'processing')
+      
+      if (hasProcessing && prevPhotos.length > 0) {
+        // 合并逻辑：保留处理中的照片状态，更新其他照片
+        const photoMap = new Map<string, Photo>()
+        
+        // 先添加新照片（来自服务器的最新数据）
+        initialPhotos.forEach(photo => {
+          photoMap.set(photo.id, photo)
+        })
+        
+        // 保留旧照片中正在处理的状态（如果新照片中没有或状态不同）
+        prevPhotos.forEach(photo => {
+          if (photo.status === 'pending' || photo.status === 'processing') {
+            const existingPhoto = photoMap.get(photo.id)
+            // 如果新照片中没有，或者新照片状态不是处理中，保留旧状态
+            if (!existingPhoto || (existingPhoto.status !== 'pending' && existingPhoto.status !== 'processing')) {
+              photoMap.set(photo.id, photo)
+            } else {
+              // 如果新照片也有处理中状态，使用新照片（可能状态已更新）
+              photoMap.set(photo.id, existingPhoto)
+            }
+          }
+        })
+        
+        // 转换为数组并按 sort_order 排序
+        const mergedPhotos = Array.from(photoMap.values())
+        mergedPhotos.sort((a, b) => {
+          const aOrder = a.sort_order ?? 0
+          const bOrder = b.sort_order ?? 0
+          if (aOrder !== bOrder) return aOrder - bOrder
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        })
+        
+        return mergedPhotos
+      }
+      
+      // 没有处理中的照片，直接使用新数据
+      return initialPhotos
+    })
   }, [initialPhotos])
 
   // 加载照片列表（支持切换回收站视图）
-  const loadPhotos = async (showDeletedPhotos = false) => {
+  const loadPhotos = async (showDeletedPhotos = false, preserveProcessingState = true) => {
     try {
       const url = new URL(`/api/admin/albums/${album.id}/photos`, window.location.origin)
       url.searchParams.set('showDeleted', showDeletedPhotos.toString())
+      // 不设置 status 参数，获取所有状态的照片（包括 pending, processing, completed）
+      // 这样上传后的照片能立即显示，即使还在处理中
       
       const response = await fetch(url.toString())
       if (!response.ok) throw new Error('加载失败')
       
       const data = await response.json()
-      setPhotos(data.photos || [])
+      // API 返回格式可能是 { data: { photos: [...] } } 或 { photos: [...] }
+      const newPhotos = data.data?.photos || data.photos || []
+      
+      // 如果不需要保留处理中状态，直接使用新数据
+      if (!preserveProcessingState) {
+        setPhotos(newPhotos)
+        return
+      }
+      
+      // 合并新加载的照片，保留正在处理中的照片状态，避免闪烁
+      setPhotos((prevPhotos) => {
+        const photoMap = new Map<string, Photo>()
+        
+        // 先添加新照片（来自服务器的最新数据）
+        newPhotos.forEach((photo: Photo) => {
+          photoMap.set(photo.id, photo)
+        })
+        
+        // 如果旧照片中有正在处理的，且新照片中没有或状态已改变，保留旧状态
+        prevPhotos.forEach(photo => {
+          if (photo.status === 'pending' || photo.status === 'processing') {
+            const existingPhoto = photoMap.get(photo.id)
+            // 如果新照片中没有，保留旧照片
+            if (!existingPhoto) {
+              photoMap.set(photo.id, photo)
+            } else if (existingPhoto.status === 'pending' || existingPhoto.status === 'processing') {
+              // 如果新照片也是处理中状态，使用新照片（可能进度已更新）
+              photoMap.set(photo.id, existingPhoto)
+            }
+            // 如果新照片状态已变为 completed/failed，使用新照片（处理完成）
+          }
+        })
+        
+        // 转换为数组并按 sort_order 排序
+        const mergedPhotos = Array.from(photoMap.values())
+        mergedPhotos.sort((a, b) => {
+          const aOrder = a.sort_order ?? 0
+          const bOrder = b.sort_order ?? 0
+          if (aOrder !== bOrder) return aOrder - bOrder
+          // 如果 sort_order 相同，按创建时间倒序
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        })
+        
+        return mergedPhotos
+      })
     } catch (error) {
       console.error('Failed to load photos:', error)
       handleApiError(error, '加载照片失败')
@@ -155,9 +244,9 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
   // 轮询检查处理中的照片
   useEffect(() => {
     if (processingCount > 0) {
-      // 开始轮询
+      // 开始轮询：使用 loadPhotos 而不是 router.refresh，避免页面闪烁
       pollIntervalRef.current = setInterval(() => {
-        router.refresh()
+        loadPhotos(showDeleted, true) // 保留处理中状态，避免闪烁
       }, 3000) // 每 3 秒刷新一次
     } else {
       // 停止轮询
@@ -172,9 +261,23 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
         clearInterval(pollIntervalRef.current)
       }
     }
-  }, [processingCount, router])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processingCount, showDeleted]) // loadPhotos 是稳定的函数，不需要添加到依赖
 
-  const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL
+  // 使用服务器端传递的 mediaUrl 作为初始值，避免 hydration mismatch
+  // 如果服务器端没有传递，则在客户端获取
+  const [mediaUrl, setMediaUrl] = useState<string>(serverMediaUrl || '')
+  
+  useEffect(() => {
+    // 在客户端获取环境变量，确保使用最新的值
+    const clientMediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || ''
+    if (clientMediaUrl && clientMediaUrl !== mediaUrl) {
+      setMediaUrl(clientMediaUrl)
+    } else if (!mediaUrl && serverMediaUrl) {
+      // 如果客户端没有值但服务器端有值，使用服务器端的值
+      setMediaUrl(serverMediaUrl)
+    }
+  }, [serverMediaUrl, mediaUrl])
 
   // toggleSelection removed as it's not used
 
@@ -321,8 +424,21 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
     }
   }
 
-  const handleUploadComplete = () => {
-    router.refresh()
+  const handleUploadComplete = async () => {
+    // 上传完成后，自动关闭上传组件，避免遮挡照片
+    setShowUploader(false)
+    
+    // 立即重新加载照片列表，确保新上传的照片能立即显示
+    // preserveProcessingState = false，因为这是上传完成后的首次加载，应该显示最新状态
+    await loadPhotos(showDeleted, false)
+    
+    // 延迟再次加载，确保服务器已处理完上传
+    // 这次保留处理中状态，避免闪烁
+    setTimeout(async () => {
+      await loadPhotos(showDeleted, true)
+      // 最后刷新页面数据（用于更新相册统计等）
+      router.refresh()
+    }, 1000)
   }
 
   // 批量重新生成预览图
@@ -885,6 +1001,7 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
               "btn-ghost text-sm min-h-[44px] px-3 py-2.5 active:scale-95",
               showDeleted ? "bg-accent/10 text-accent" : ""
             )}
+            aria-label={showDeleted ? '返回相册' : '回收站'}
           >
             <Archive className="w-4 h-4" />
             <span className="hidden sm:inline">{showDeleted ? '返回相册' : '回收站'}</span>
@@ -904,7 +1021,7 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
 
       {/* 上传区域 */}
       {showUploader && !showDeleted && (
-        <div className="card">
+        <div className="card mb-4">
           <PhotoUploader
             albumId={album.id}
             onComplete={handleUploadComplete}
@@ -922,9 +1039,9 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
         </div>
       )}
 
-      {/* 处理状态提示 */}
+      {/* 处理状态提示 - 增加 mt-4 确保不被上方元素遮挡 */}
       {processingCount > 0 && (
-        <div className="flex items-center justify-between gap-2 p-3 bg-accent/10 rounded-lg text-sm">
+        <div className="flex items-center justify-between gap-2 p-3 bg-accent/10 rounded-lg text-sm mt-4 relative z-0">
           <div className="flex items-center gap-2">
             <Loader2 className="w-4 h-4 text-accent animate-spin" />
             <span className="text-text-secondary">
@@ -1026,25 +1143,25 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
               {/* 优先显示缩略图，如果没有缩略图但有原图，显示原图 */}
               {photo.thumb_key ? (
                 <Image
-                  src={`${mediaUrl}/${photo.thumb_key}${photo.updated_at ? `?t=${new Date(photo.updated_at).getTime()}` : ''}`}
+                  src={mediaUrl ? `${mediaUrl}/${photo.thumb_key}${photo.updated_at ? `?t=${new Date(photo.updated_at).getTime()}` : ''}` : ''}
                   alt=""
                   fill
                   sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
                   priority={index < 6}
                   className="object-cover transition-transform duration-300 group-hover:scale-105"
-                  key={`${photo.id}-${photo.rotation ?? 'auto'}-${photo.updated_at || ''}`}
+                  key={`${photo.id}-${photo.rotation ?? 'auto'}-${photo.updated_at || ''}-${mediaUrl}`}
                   unoptimized // 跳过 Next.js Image Optimization，直接使用原始图片（避免 Vercel 无法访问 HTTP 媒体服务器）
                 />
               ) : photo.original_key && photo.status === 'failed' ? (
                 // 如果缩略图生成失败但原图存在，显示原图（降级显示）
                 <Image
-                  src={`${mediaUrl}/${photo.original_key}${photo.updated_at ? `?t=${new Date(photo.updated_at).getTime()}` : ''}`}
+                  src={mediaUrl ? `${mediaUrl}/${photo.original_key}${photo.updated_at ? `?t=${new Date(photo.updated_at).getTime()}` : ''}` : ''}
                   alt=""
                   fill
                   sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
                   priority={index < 6}
                   className="object-cover transition-transform duration-300 group-hover:scale-105 opacity-80"
-                  key={`${photo.id}-original-${photo.updated_at || ''}`}
+                  key={`${photo.id}-original-${photo.updated_at || ''}-${mediaUrl}`}
                   unoptimized
                 />
               ) : photo.status === 'failed' ? (
@@ -1192,13 +1309,14 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
 
               {/* 操作按钮 (悬停显示) */}
               {!selectionMode && !isReordering && photo.thumb_key && (
-                <div className="absolute bottom-2 left-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
+                <div className="absolute bottom-2 left-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 flex-nowrap">
                   {coverPhotoId !== photo.id && (
                     <button
                       onClick={(e) => handleSetCover(photo.id, e)}
-                      className="bg-black/60 hover:bg-black/80 px-3 py-2.5 md:px-2 md:py-1.5 rounded-full text-xs text-white flex items-center justify-center gap-1.5 md:gap-1 min-w-[100px] md:min-w-[80px] min-h-[44px] md:min-h-0"
+                      className="bg-black/70 hover:bg-black/90 px-1.5 py-1 rounded-full text-[10px] text-white flex items-center justify-center gap-0.5 flex-shrink-0 whitespace-nowrap"
+                      title="设为封面"
                     >
-                      <ImageIcon className="w-4 h-4 md:w-3 md:h-3 flex-shrink-0" />
+                      <ImageIcon className="w-3 h-3 flex-shrink-0" />
                       <span>设为封面</span>
                     </button>
                   )}
@@ -1209,41 +1327,42 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
                         e.stopPropagation()
                         handleReprocessSingle(photo.id)
                       }}
-                      className="bg-blue-500/80 hover:bg-blue-600 px-3 py-2.5 md:px-2 md:py-1.5 rounded-full text-xs text-white flex items-center justify-center gap-1.5 md:gap-1 min-w-[100px] md:min-w-[80px] min-h-[44px] md:min-h-0"
+                      className="bg-blue-500/80 hover:bg-blue-600 px-3 py-2.5 md:px-2 md:py-1.5 rounded-full text-white flex items-center justify-center gap-0.5 flex-shrink-0 whitespace-nowrap"
                       title="重新处理照片（应用当前相册风格设置）"
                     >
                       <RefreshCw className="w-4 h-4 md:w-3 md:h-3" />
                       <span className="hidden sm:inline">重新处理</span>
-                      <span className="sm:hidden">重处理</span>
+                      <span className="sm:hidden">处理</span>
                     </button>
                   )}
                   {showDeleted ? (
                     <>
                       <button
                         onClick={(e) => handleRestorePhoto(photo.id, e)}
-                        className="bg-green-500/80 hover:bg-green-600 px-3 py-2.5 md:px-2 md:py-1.5 rounded-full text-xs text-white flex items-center justify-center gap-1.5 md:gap-1 min-w-[80px] md:min-w-[60px] min-h-[44px] md:min-h-0"
+                        className="bg-green-500/80 hover:bg-green-600 px-1.5 py-1 rounded-full text-[10px] text-white flex items-center justify-center gap-0.5 flex-shrink-0 whitespace-nowrap"
                         disabled={isRestoring}
+                        title="恢复"
                       >
-                        <RestoreIcon className="w-4 h-4 md:w-3 md:h-3" />
-                        恢复
+                        <RestoreIcon className="w-3 h-3 flex-shrink-0" />
+                        <span>恢复</span>
                       </button>
                       <button
                         onClick={(e) => handleDeletePhoto(photo.id, e)}
-                        className="bg-red-500/80 hover:bg-red-600 px-3 py-2.5 md:px-2 md:py-1.5 rounded-full text-xs text-white flex items-center justify-center gap-1.5 md:gap-1 min-w-[80px] md:min-w-[60px] min-h-[44px] md:min-h-0"
+                        className="bg-red-500/80 hover:bg-red-600 p-1.5 rounded-full text-white flex items-center justify-center flex-shrink-0"
                         disabled={isDeleting}
+                        title="永久删除"
                       >
-                        <Trash2 className="w-4 h-4 md:w-3 md:h-3" />
-                        永久删除
+                        <Trash2 className="w-3 h-3 flex-shrink-0" />
                       </button>
                     </>
                   ) : (
                     <button
                       onClick={(e) => handleDeletePhoto(photo.id, e)}
-                      className="bg-red-500/80 hover:bg-red-600 px-3 py-2.5 md:px-2 md:py-1.5 rounded-full text-xs text-white flex items-center justify-center gap-1.5 md:gap-1 min-w-[80px] md:min-w-[60px] min-h-[44px] md:min-h-0"
+                      className="bg-red-500/80 hover:bg-red-600 p-1.5 rounded-full text-white flex items-center justify-center flex-shrink-0"
                       disabled={isDeleting}
+                      title="删除"
                     >
-                      <Trash2 className="w-4 h-4 md:w-3 md:h-3" />
-                      删除
+                      <Trash2 className="w-3 h-3 flex-shrink-0" />
                     </button>
                   )}
                 </div>
@@ -1301,7 +1420,7 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
                 </button>
              </div>
           ) : !showUploader ? (
-            /* 空状态 */
+            /* 空状态 - 只在没有照片且上传组件未显示时显示 */
             <div className="space-y-4">
               <Upload className="w-16 h-16 text-text-muted mx-auto mb-4" />
               <h2 className="text-xl font-medium mb-2">上传您的第一张照片</h2>
@@ -1316,7 +1435,16 @@ export function AlbumDetailClient({ album, initialPhotos }: AlbumDetailClientPro
                 选择照片
               </button>
             </div>
-          ) : null}
+          ) : (
+            /* 上传组件显示时，显示提示信息而不是空状态 */
+            <div className="space-y-4">
+              <Loader2 className="w-16 h-16 text-text-muted mx-auto mb-4 animate-spin" />
+              <h2 className="text-xl font-medium mb-2">照片正在上传和处理中</h2>
+              <p className="text-text-secondary">
+                上传完成后，照片将自动显示在这里
+              </p>
+            </div>
+          )}
         </div>
       )}
 

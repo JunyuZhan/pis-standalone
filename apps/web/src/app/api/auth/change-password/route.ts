@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { getCurrentUser } from '@/lib/auth/api-helpers'
 import { getAuthDatabase } from '@/lib/auth'
-import { hashPassword, verifyPassword } from '@/lib/auth'
+import { hashPassword, verifyPassword } from '@/lib/auth/password'
 import { initAuthDatabase } from '@/lib/auth/database'
 import { changePasswordSchema } from '@/lib/validation/schemas'
 import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
@@ -81,8 +81,15 @@ export async function POST(request: NextRequest) {
       return ApiError.notFound('用户不存在')
     }
 
-    // 验证当前密码
-    const isValidPassword = await verifyPassword(currentPassword, userRecord.password_hash)
+    // 检查用户是否有密码（某些用户可能没有设置密码）
+    // password_hash 为 null 或空字符串表示密码未设置
+    if (!userRecord.password_hash || (typeof userRecord.password_hash === 'string' && userRecord.password_hash.trim() === '')) {
+      return ApiError.validation('用户未设置密码，无法修改。请使用首次登录设置密码功能')
+    }
+
+    // 验证当前密码（此时 password_hash 已确保不为 null）
+    const passwordHash: string = userRecord.password_hash
+    const isValidPassword = await verifyPassword(currentPassword, passwordHash)
 
     if (!isValidPassword) {
       return ApiError.validation('当前密码错误')

@@ -258,19 +258,32 @@ class PostgresQueryBuilder<T = any> {
       updateData
     );
     
-    // 如果有 select 列，需要重新查询
+    // 如果有 select 列，从返回的结果中筛选
     if (this.selectColumns && result.data) {
-      const selectResult = await this.adapter.findMany<T>(
-        this.table,
-        this.filters,
-        {
-          select: this.selectColumns,
-          limit: this.limitValue,
-          offset: this.offsetValue,
-          orderBy: this.orderBy.length > 0 ? this.orderBy : undefined,
+      // 在内存中筛选字段，而不是重新查询（重新查询会导致 status 变更后查不到数据的问题）
+      const filteredData = result.data.map(row => {
+        const filtered: any = {};
+        // 如果 selectColumns 包含 *，则返回所有字段
+        if (this.selectColumns!.includes('*')) {
+          return row;
         }
-      );
-      return selectResult;
+        
+        for (const col of this.selectColumns!) {
+          // 处理 count 选项，忽略它
+          if (col === 'count') continue;
+          // 处理别名 (e.g. "col as alias") - 简单处理，只取 col
+          const fieldName = col.split(' as ')[0].trim().split(' ')[0].trim();
+           if (fieldName in (row as any)) {
+             filtered[fieldName] = (row as any)[fieldName];
+           }
+        }
+        return filtered as T;
+      });
+      
+      return {
+        data: filteredData,
+        error: null
+      };
     }
     
     return result;

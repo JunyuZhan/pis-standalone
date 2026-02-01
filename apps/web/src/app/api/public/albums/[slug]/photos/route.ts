@@ -39,8 +39,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     const { slug } = slugValidation.data
     const { searchParams } = new URL(request.url)
     
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '20')
+    const pageRaw = searchParams.get('page') || '1'
+    const limitRaw = searchParams.get('limit') || '20'
+    const page = Math.max(1, parseInt(pageRaw) || 1) // 确保页码至少为1
+    const limit = Math.max(1, Math.min(100, parseInt(limitRaw) || 20)) // 限制在1-100之间
     const groupId = searchParams.get('group')
 
     const db = await createClient()

@@ -47,7 +47,7 @@ bash docker/deploy.sh
 1. **在服务器上下载字体文件**（推荐）：
    ```bash
    # 在服务器上（如果有网络访问）
-   bash scripts/download-fonts.sh
+   bash scripts/setup-fonts.sh
    # 或手动下载（见 docs/FONTS.md）
    ```
 
@@ -65,7 +65,7 @@ bash docker/deploy.sh
 1. **在本地准备字体文件**：
    ```bash
    # 下载字体文件
-   bash scripts/download-fonts.sh
+   bash scripts/setup-fonts.sh
    # 或手动下载（见 docs/FONTS.md）
    ```
 
@@ -93,7 +93,7 @@ bash docker/deploy.sh
 **选项 1**: 在构建时下载（需要网络）
 ```dockerfile
 # 在 Dockerfile 中添加
-RUN bash scripts/download-fonts.sh || echo "Font download failed, using fallback"
+RUN bash scripts/setup-fonts.sh || echo "Font download failed, using fallback"
 ```
 
 **选项 2**: 使用系统字体（无需下载）
@@ -138,7 +138,7 @@ RUN bash scripts/download-fonts.sh || echo "Font download failed, using fallback
 ```bash
 # 在服务器上
 cd pis-standalone
-bash scripts/download-fonts.sh
+bash scripts/setup-fonts.sh
 # 或手动下载（见 [字体配置指南](./FONTS.md)）
 ```
 

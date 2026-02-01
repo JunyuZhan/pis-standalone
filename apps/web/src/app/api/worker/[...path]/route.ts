@@ -67,10 +67,6 @@ export async function POST(
 ) {
   try {
     const resolvedParams = await params
-    console.log(`[Worker Proxy POST] Request URL: ${request.url}`)
-    console.log(`[Worker Proxy POST] Resolved params:`, JSON.stringify(resolvedParams))
-    console.log(`[Worker Proxy POST] Path segments:`, JSON.stringify(resolvedParams.path))
-    
     const response = await proxyRequest(request, resolvedParams)
     
     // 确保所有响应都包含缓存控制头，防止 Cloudflare 缓存
@@ -78,8 +74,6 @@ export async function POST(
     headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     headers.set('Pragma', 'no-cache')
     headers.set('Expires', '0')
-    
-    console.log(`[Worker Proxy POST] Response status: ${response.status}`)
     
     return new NextResponse(response.body, {
       status: response.status,
@@ -171,12 +165,6 @@ async function proxyRequest(
   try {
     const pathSegments = params.path
     
-    // 调试日志
-    console.log(`[Worker Proxy] Request path: ${request.url}`)
-    console.log(`[Worker Proxy] params:`, JSON.stringify(params))
-    console.log(`[Worker Proxy] pathSegments:`, JSON.stringify(pathSegments))
-    console.log(`[Worker Proxy] pathSegments type:`, typeof pathSegments, Array.isArray(pathSegments))
-    
     // 确保 pathSegments 是数组
     if (!Array.isArray(pathSegments)) {
       console.error(`[Worker Proxy] pathSegments is not an array:`, pathSegments)
@@ -238,8 +226,6 @@ async function proxyRequest(
     const queryString = url.search
     
     const targetUrl = `${getWorkerUrl()}${targetPath}${queryString}`
-    
-    console.log(`[Worker Proxy] ${request.method} ${request.url} -> ${targetUrl} (pathSegments: ${JSON.stringify(pathSegments)}, targetPath: ${targetPath})`)
     
     // 准备请求头
     const headers: HeadersInit = {

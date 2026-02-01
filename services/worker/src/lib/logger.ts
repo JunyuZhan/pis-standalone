@@ -1,8 +1,7 @@
 /**
  * PIS Worker - 结构化日志工具
- * 
- * 使用 pino 提供高性能的结构化日志
- * 
+ *
+ * @description 使用 pino 提供高性能的结构化日志
  * @author junyuzhan <junyuzhan@outlook.com>
  * @license MIT
  */
@@ -34,10 +33,10 @@ const ERROR_LOG_FILE = join(LOG_DIR, 'worker-error.log');
 // 是否启用文件日志（默认启用）
 const ENABLE_FILE_LOG = process.env.ENABLE_FILE_LOG !== 'false';
 
-// 是否启用彩色输出（开发环境默认启用）
+// 是否启用美化输出（开发环境默认启用）
 const ENABLE_PRETTY = process.env.NODE_ENV === 'development' || process.env.ENABLE_PRETTY_LOG === 'true';
 
-// 创建日志传输流
+// 创建日志流
 const streams: Array<{ level: pino.Level; stream: pino.DestinationStream }> = [
   // 控制台输出
   {
@@ -67,7 +66,7 @@ if (ENABLE_FILE_LOG) {
       }),
     });
 
-    // 错误日志（单独文件）
+    // 错误日志（独立文件）
     streams.push({
       level: 'error',
       stream: pino.destination({
@@ -117,14 +116,35 @@ const logger = pino(
 // 导出 logger
 export default logger;
 
-// 导出便捷方法
+/**
+ * 便捷日志方法集合
+ *
+ * @description
+ * 提供直接绑定到 logger 实例的便捷方法，方便解构使用。
+ *
+ * @example
+ * ```typescript
+ * import { log } from '@/lib/logger'
+ * log.info('Server started')
+ * ```
+ */
 export const log = {
+  /** 输出调试日志 */
   debug: logger.debug.bind(logger),
+  /** 输出信息日志 */
   info: logger.info.bind(logger),
+  /** 输出警告日志 */
   warn: logger.warn.bind(logger),
+  /** 输出错误日志 */
   error: logger.error.bind(logger),
+  /** 输出致命错误日志 */
   fatal: logger.fatal.bind(logger),
 };
 
-// 导出 logger 实例（用于高级用法）
+/**
+ * Pino Logger 实例
+ *
+ * @description
+ * 原始的 Pino 实例，用于高级用法（如创建子 Logger）。
+ */
 export { logger };

@@ -81,7 +81,33 @@ Error: Cannot find module './fonts/Inter-Regular.woff2'
 2. 如果文件不存在，运行：`bash scripts/setup-fonts.sh`
 3. 如果脚本失败，手动下载字体文件（见上方手动下载方式）
 
-### 问题 2: 服务器没有网络访问
+### 问题 2: 字体文件解码错误
+
+**错误信息**：
+- `Failed to decode downloaded font` - 字体文件无法解码，通常是文件损坏或格式不正确
+- `OTS parsing error: invalid sfntVersion` - OpenType Sanitizer 无法解析字体文件，文件格式无效
+
+**解决方案**：
+1. **重新下载字体文件**（推荐）：
+   ```bash
+   bash scripts/setup-fonts.sh
+   ```
+
+2. **验证字体文件大小**：
+   ```bash
+   ls -lh apps/web/src/app/fonts/*.woff2
+   ```
+   如果文件小于 5KB，说明文件损坏，需要重新下载。
+
+3. **手动下载**（如果脚本失败）：
+   - 访问 https://google-webfonts-helper.herokuapp.com/
+   - 下载以下字体（每个字体需要 3 个权重：400, 600, 700，格式：woff2）：
+     - **Inter** - 选择 "latin" subset
+     - **Noto Serif SC** - 选择 "chinese-simplified" subset
+     - **Playfair Display** - 选择 "latin" subset
+   - 将文件放到 `apps/web/src/app/fonts/` 目录
+
+### 问题 3: 服务器没有网络访问
 
 **解决方案**：
 1. **在本地下载字体文件**：
@@ -97,11 +123,13 @@ Error: Cannot find module './fonts/Inter-Regular.woff2'
    ```
 
 3. **或使用系统字体**（临时方案）：
-   - 修改 `apps/web/src/app/layout.tsx`
-   - 使用系统字体替代本地字体文件
-   - 详见开发文档
+   - 应用会自动使用 fallback 字体：
+     - **Inter** → 系统无衬线字体（-apple-system, BlinkMacSystemFont, Segoe UI, Roboto）
+     - **Noto Serif SC** → 系统中文字体（PingFang SC, Hiragino Sans GB, Microsoft YaHei）
+     - **Playfair Display** → 系统衬线字体（Georgia, Times New Roman）
+   - 注意：使用系统字体会影响视觉效果，但不会影响功能
 
-### 问题 3: 字体文件下载失败
+### 问题 4: 字体文件下载失败
 
 **可能原因**：
 - 网络连接问题
@@ -113,12 +141,41 @@ Error: Cannot find module './fonts/Inter-Regular.woff2'
 2. 使用代理（如果可用）
 3. 手动下载字体文件（见上方手动下载方式）
 
+### 问题 5: 浏览器扩展错误（可忽略）
+
+**错误信息**：
+- `Could not establish connection. Receiving end does not exist`
+
+**说明**：这是浏览器扩展相关的错误，**不是应用本身的问题**，可以忽略。
+
 ---
 
-## 📝 字体文件大小
+## 📝 字体文件大小参考
 
-- **单个字体文件**: 约 50-200 KB
+- **Inter**: ~20-30KB 每个文件
+- **Noto Serif SC**: ~100-200KB 每个文件（中文字体较大）
+- **Playfair Display**: ~20-30KB 每个文件
 - **总大小**: 约 1-2 MB（9 个文件）
+
+## 🔄 修复后重新构建
+
+修复字体文件后，需要重新构建应用：
+
+```bash
+# 本地开发
+cd apps/web
+pnpm build
+
+# Docker 部署
+cd docker
+docker compose -f docker-compose.standalone.yml build --no-cache web
+docker compose -f docker-compose.standalone.yml up -d web
+```
+
+## 💡 其他提示
+
+- **浏览器缓存**: 如果修复后仍有问题，清除浏览器缓存或使用硬刷新（Ctrl+Shift+R / Cmd+Shift+R）
+- **字体文件大小验证**: 正常字体文件应该 > 5KB，如果小于 5KB 说明文件损坏
 
 ---
 

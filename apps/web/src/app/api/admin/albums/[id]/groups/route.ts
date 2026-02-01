@@ -62,23 +62,33 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const groups = (groupsResult.data || []) as Array<{ id: string }>
 
-    // 获取每个分组的照片数量
-    const groupsWithCounts = await Promise.all(
-      groups.map(async (group) => {
-        const countResult = await db
-          .from('photo_group_assignments')
-          .select('*')
-          .eq('group_id', group.id)
-          .execute()
+    // 优化：批量查询所有分组的照片数量，避免 N+1 查询问题
+    const groupIds = groups.map((g) => g.id)
+    const counts = new Map<string, number>()
+    
+    if (groupIds.length > 0) {
+      // 批量查询所有分组的照片关联
+      const assignmentsResult = await db
+        .from('photo_group_assignments')
+        .select('group_id')
+        .in('group_id', groupIds)
+        .execute()
 
-        const count = countResult.count || countResult.data?.length || 0
+      if (assignmentsResult.data) {
+        const assignments = assignmentsResult.data as unknown as { group_id: string }[]
+        // 统计每个分组的照片数量
+        assignments.forEach((assignment) => {
+          const groupId = assignment.group_id
+          counts.set(groupId, (counts.get(groupId) || 0) + 1)
+        })
+      }
+    }
 
-        return {
-          ...group,
-          photo_count: count,
-        }
-      })
-    )
+    // 为每个分组添加照片数量
+    const groupsWithCounts = groups.map((group) => ({
+      ...group,
+      photo_count: counts.get(group.id) || 0,
+    }))
 
     return createSuccessResponse({ groups: groupsWithCounts })
   } catch (error) {

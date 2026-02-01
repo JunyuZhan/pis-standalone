@@ -60,3 +60,21 @@ vi.mock('@/lib/supabase/server', () => ({
 process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000'
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co'
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key'
+
+// Mock toast functions
+vi.mock('@/lib/toast', () => ({
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
+  showInfo: vi.fn(),
+  handleApiError: vi.fn(),
+}))
+
+// Mock dynamic imports
+vi.mock('next/dynamic', () => ({
+  default: (importFn: () => Promise<any>) => {
+    return {
+      __esModule: true,
+      default: () => null,
+    }
+  },
+}))

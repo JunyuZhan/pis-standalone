@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/database'
 import { getCurrentUser } from '@/lib/auth/api-helpers'
-import { getAlbumShareUrl } from '@/lib/utils'
+import { getAlbumShareUrl, generateAlbumSlug } from '@/lib/utils'
 import type { AlbumInsert, Database } from '@/types/database'
 import { albumIdSchema } from '@/lib/validation/schemas'
-import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
+import { safeValidate, handleError, ApiError, createSuccessResponse } from '@/lib/validation/error-handler'
 
 type Album = Database['public']['Tables']['albums']['Row']
 
@@ -55,6 +55,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const album = originalAlbumResult.data as Album
     const newAlbumData: AlbumInsert = {
       title: `${album.title} (副本)`,
+      slug: generateAlbumSlug(), // 生成新的唯一 slug
       description: album.description,
       is_public: album.is_public,
       layout: album.layout,
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       shareUrl = `${appUrl}/album/${encodeURIComponent(newAlbum.slug || '')}`
     }
 
-    return NextResponse.json({
+    return createSuccessResponse({
       id: newAlbum.id,
       slug: newAlbum.slug,
       title: newAlbum.title,

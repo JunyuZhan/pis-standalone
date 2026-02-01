@@ -134,7 +134,7 @@ configure_deployment_mode() {
     echo -e "${BOLD}请选择部署架构：${NC}"
     echo ""
     echo "  1) 完全自托管（推荐）"
-    echo "     - 前端: 自托管（Docker + Nginx）"
+    echo "     - 前端: 自托管（Docker，Next.js 集成代理）"
     echo "     - 数据库: PostgreSQL（自托管）"
     echo "     - 存储/Worker: 你的服务器"
     echo ""
@@ -186,14 +186,17 @@ configure_domain() {
     fi
 
     # 自动推断相关 URL
-    APP_URL="https://$DOMAIN"
-    MEDIA_URL="https://$DOMAIN/media"
-    WORKER_URL="https://$DOMAIN/worker-api"
-
+        # 在 standalone 模式下，所有服务都通过 Web 容器的 8081 端口访问
     if [ "$DOMAIN" = "localhost" ]; then
-        APP_URL="http://localhost:3000"
-        MEDIA_URL="http://localhost:9000/pis-photos"
-        WORKER_URL="http://localhost:3001"
+        # 本地测试：使用 8081 端口（Web 容器暴露的端口）
+        APP_URL="http://localhost:8081"
+        MEDIA_URL="http://localhost:8081/media"
+        WORKER_URL="http://localhost:8081/worker-api"
+    else
+        # 生产环境：使用域名（通过 Next.js 路径访问）
+        APP_URL="https://$DOMAIN"
+        MEDIA_URL="https://$DOMAIN/media"
+        WORKER_URL="https://$DOMAIN/worker-api"
     fi
 }
 
@@ -210,16 +213,16 @@ configure_postgresql() {
     DATABASE_PORT=$(get_input "数据库端口" "5432")
     DATABASE_NAME=$(get_input "数据库名称" "pis")
     DATABASE_USER=$(get_input "数据库用户" "pis")
-    DATABASE_PASSWORD=$(get_input "数据库密码" "")
+    DATABASE_PASSWORD=$(get_input "数据库密码 (留空自动生成)" "")
     
     if [ -z "$DATABASE_PASSWORD" ]; then
         DATABASE_PASSWORD=$(generate_secret | cut -c1-32)
-        print_success "已生成数据库密码"
+        print_success "已自动生成数据库密码"
     fi
 
-    # 生成 JWT Secret
+    # 自动生成 JWT Secret（不询问用户）
     AUTH_JWT_SECRET=$(generate_secret)
-    print_success "已生成 JWT Secret"
+    print_success "已自动生成 JWT Secret"
 
     print_success "PostgreSQL 已配置"
     
@@ -389,7 +392,9 @@ configure_alerts() {
 generate_config() {
     print_step "9/11" "生成配置并部署"
 
-    local env_file=".env.generated"
+    # 环境文件应该在项目根目录，而不是 docker 目录
+    local env_file="$PROJECT_ROOT/.env.generated"
+    local env_target="$PROJECT_ROOT/.env"
 
     echo ""
     echo -e "${CYAN}正在生成配置文件...${NC}"
@@ -484,9 +489,9 @@ ALERT_TO_EMAIL=$ALERT_TO_EMAIL
 EOF
         fi
 
-        # 复制为 .env
-        cp "$env_file" .env
-        print_success "配置已保存到 .env"
+        # 复制为 .env（在项目根目录）
+        cp "$env_file" "$env_target"
+        print_success "配置已保存到 $env_target"
 
         echo ""
         echo -e "${CYAN}========================================${NC}"
@@ -523,9 +528,9 @@ EOF
             echo "     - ✅ 部署脚本会自动引导创建（推荐）"
             echo "     - 或手动执行: pnpm create-admin"
             echo ""
-            echo -e "${GREEN}4. 配置 Nginx 和 SSL${NC}"
+            echo -e "${GREEN}4. 配置 SSL（可选）${NC}"
             echo ""
-            echo "参考 docker/nginx/ 目录下的配置文件配置 Nginx 反向代理和 SSL。"
+            echo "SSL/TLS 由内网穿透服务（frpc/ddnsto）处理，无需在容器内配置。"
             echo ""
         else
             echo -e "${GREEN}2. Vercel 前端部署${NC}"
@@ -620,9 +625,14 @@ show_completion_info() {
             echo "   访问地址: https://$DOMAIN/admin/login"
         fi
         echo "   访问地址: http://localhost:8081/admin/login"
-        if [ -n "$ADMIN_EMAIL" ] && [ -n "$ADMIN_PASSWORD" ]; then
+        if [ -n "$ADMIN_EMAIL" ]; then
             echo "   登录邮箱: $ADMIN_EMAIL"
-            echo "   登录密码: $ADMIN_PASSWORD"
+            if [ -n "$ADMIN_PASSWORD" ]; then
+                echo "   登录密码: $ADMIN_PASSWORD"
+            else
+                echo -e "   ${CYAN}密码: 首次登录时设置${NC}"
+                echo -e "   ${CYAN}提示: 访问登录页面后，系统会提示您设置初始密码${NC}"
+            fi
         else
             echo -e "   ${YELLOW}⚠️  请使用 'pnpm create-admin' 创建管理员账号${NC}"
         fi
@@ -818,51 +828,214 @@ create_admin_account() {
     if [ "$admin_exists" = false ]; then
         echo -e "${YELLOW}⚠️  首次部署必须创建管理员账号${NC}"
         echo ""
-    fi
-    
-    # 获取管理员邮箱和密码（全局变量，供 show_completion_info 使用）
-    ADMIN_EMAIL=$(get_input "管理员邮箱" "admin@example.com")
-    ADMIN_PASSWORD=$(get_input "管理员密码（至少 8 个字符）" "")
-    
-    # 导出变量以便在其他函数中使用
-    export ADMIN_EMAIL ADMIN_PASSWORD
-    
-    if [ -z "$ADMIN_PASSWORD" ]; then
-        ADMIN_PASSWORD=$(generate_secret | cut -c1-16)
-        echo -e "${GREEN}✓ 已自动生成密码: ${ADMIN_PASSWORD}${NC}"
-        echo -e "${YELLOW}⚠️  请妥善保管此密码！${NC}"
-    fi
-    
-    # 验证密码长度
-    if [ ${#ADMIN_PASSWORD} -lt 8 ]; then
-        print_error "密码至少需要 8 个字符"
-        exit 1
+        echo -e "${CYAN}正在创建管理员账号...${NC}"
+        
+        # 自动生成管理员账号（首次部署，密码为空，首次登录时设置）
+        ADMIN_EMAIL="admin@${DOMAIN:-localhost}"
+        if [ "$DOMAIN" = "localhost" ]; then
+            ADMIN_EMAIL="admin@example.com"
+        fi
+        # 不设置密码，让用户首次登录时设置
+        ADMIN_PASSWORD=""
+        
+        echo -e "${GREEN}✓ 已创建管理员账号${NC}"
+        echo ""
+        echo -e "${GREEN}管理员账号信息：${NC}"
+        echo "  邮箱: $ADMIN_EMAIL"
+        echo "  密码: 首次登录时设置"
+        echo ""
+        echo -e "${CYAN}📝 提示：${NC}"
+        echo "  1. 访问登录页面后，输入邮箱地址"
+        echo "  2. 系统会提示您设置初始密码"
+        echo "  3. 设置完成后即可登录管理后台"
+        echo ""
+        
+        # 导出变量以便在其他函数中使用
+        export ADMIN_EMAIL ADMIN_PASSWORD
+    else
+        # 已有管理员账号，询问是否创建新的
+        echo -e "${CYAN}是否创建新的管理员账号？${NC}"
+        echo ""
+        ADMIN_EMAIL=$(get_input "管理员邮箱" "admin@example.com")
+        ADMIN_PASSWORD=$(get_input "管理员密码（至少 8 个字符，留空自动生成）" "")
+        
+        # 导出变量以便在其他函数中使用
+        export ADMIN_EMAIL ADMIN_PASSWORD
+        
+        if [ -z "$ADMIN_PASSWORD" ]; then
+            ADMIN_PASSWORD=$(generate_secret | cut -c1-16)
+            echo -e "${GREEN}✓ 已自动生成密码: ${ADMIN_PASSWORD}${NC}"
+            echo -e "${YELLOW}⚠️  请妥善保管此密码！${NC}"
+        fi
+        
+        # 验证密码长度
+        if [ ${#ADMIN_PASSWORD} -lt 8 ]; then
+            print_error "密码至少需要 8 个字符"
+            exit 1
+        fi
     fi
     
     echo ""
     echo -e "${CYAN}正在创建管理员账号...${NC}"
     
-    # 等待 Web 容器启动
-    local max_attempts=30
+    # 等待 Web 容器启动（增加等待时间，因为首次启动需要构建镜像）
+    local max_attempts=60  # 增加到 60 次（120 秒）
     local attempt=0
+    echo "等待 Web 容器启动（首次启动可能需要较长时间构建镜像）..."
     while [ $attempt -lt $max_attempts ]; do
-        if docker ps | grep -q "pis-web.*Up"; then
+        # 检查容器是否存在且状态为运行中
+        if docker ps --format '{{.Names}}\t{{.Status}}' | grep -q "pis-web.*Up"; then
+            # 再等待几秒确保容器完全就绪
+            sleep 5
             break
         fi
-        echo "等待 Web 容器启动... ($attempt/$max_attempts)"
+        # 每 10 次显示一次进度
+        if [ $((attempt % 10)) -eq 0 ] && [ $attempt -gt 0 ]; then
+            echo "等待 Web 容器启动... ($attempt/$max_attempts) - 这可能需要几分钟时间..."
+        fi
         sleep 2
         attempt=$((attempt + 1))
     done
     
     if [ $attempt -eq $max_attempts ]; then
-        print_warning "Web 容器启动超时，将在宿主机执行创建脚本"
+        print_warning "Web 容器启动超时（已等待 120 秒）"
+        echo ""
+        echo -e "${YELLOW}可能的原因：${NC}"
+        echo "  1. 首次启动需要构建镜像，可能需要更长时间"
+        echo "  2. 容器启动失败，请检查日志: docker logs pis-web"
+        echo ""
+        echo -e "${CYAN}建议：${NC}"
+        echo "  1. 查看容器状态: docker ps -a | grep pis-web"
+        echo "  2. 查看容器日志: docker logs pis-web"
+        echo "  3. 等待容器完全启动后，手动执行: pnpm create-admin"
+        echo ""
         create_admin_on_host
         return 0
     fi
     
     # 在 Web 容器内执行创建管理员脚本（使用 Docker 内部网络）
     echo "在 Web 容器内创建管理员账号..."
-    if docker exec pis-web sh -c "cd /app && DATABASE_HOST=postgres DATABASE_PORT=5432 DATABASE_NAME=${DATABASE_NAME:-pis} DATABASE_USER=${DATABASE_USER:-pis} DATABASE_PASSWORD=${DATABASE_PASSWORD:-changeme} pnpm exec tsx scripts/create-admin.ts '$ADMIN_EMAIL' '$ADMIN_PASSWORD'" 2>&1; then
+    
+    # 方法1: 优先使用独立的脚本文件（更可靠）
+    if [ -f "$SCRIPT_DIR/../scripts/utils/create-admin-inline.js" ]; then
+        echo "使用独立脚本创建管理员账号..."
+        # 如果密码为空，传递空字符串，脚本会创建密码为空的管理员
+        local password_arg="${ADMIN_PASSWORD:-}"
+        if docker cp "$PROJECT_ROOT/scripts/utils/create-admin-inline.js" pis-web:/tmp/create-admin.js 2>/dev/null && \
+           docker exec pis-web node /tmp/create-admin.js "$ADMIN_EMAIL" "$password_arg" "postgres" "5432" "${DATABASE_NAME:-pis}" "${DATABASE_USER:-pis}" "$DATABASE_PASSWORD" 2>&1; then
+            docker exec pis-web rm -f /tmp/create-admin.js 2>/dev/null || true
+            print_success "管理员账号创建成功！"
+            echo ""
+            echo -e "${GREEN}═══════════════════════════════════════${NC}"
+            echo -e "${GREEN}  管理员账号信息${NC}"
+            echo -e "${GREEN}═══════════════════════════════════════${NC}"
+            echo ""
+            echo -e "${BOLD}邮箱:${NC} $ADMIN_EMAIL"
+            if [ -n "$ADMIN_PASSWORD" ]; then
+                echo -e "${BOLD}密码:${NC} $ADMIN_PASSWORD"
+                echo ""
+                echo -e "${YELLOW}⚠️  请妥善保管以上信息！${NC}"
+            else
+                echo -e "${BOLD}密码:${NC} 首次登录时设置"
+                echo ""
+                echo -e "${CYAN}📝 提示：${NC}"
+                echo "  访问登录页面后，输入邮箱地址"
+                echo "  系统会提示您设置初始密码"
+            fi
+            echo ""
+            echo -e "${CYAN}登录地址：${NC}"
+            if [ "$DOMAIN" != "localhost" ]; then
+                echo "  https://$DOMAIN/admin/login"
+            fi
+            echo "  http://localhost:8081/admin/login"
+            echo ""
+            return 0
+        fi
+        docker exec pis-web rm -f /tmp/create-admin.js 2>/dev/null || true
+    fi
+    
+    # 方法2: 使用 Node.js 内联代码（回退方案）
+    echo "使用 Node.js 内联代码创建管理员账号..."
+    
+    # 转义特殊字符（用于 SQL 和 shell）
+    ADMIN_EMAIL_ESC=$(echo "$ADMIN_EMAIL" | sed "s/'/''/g" | sed 's/\\/\\\\/g')
+    ADMIN_PASSWORD_ESC=$(echo "$ADMIN_PASSWORD" | sed "s/'/''/g" | sed 's/\\/\\\\/g')
+    DB_PASSWORD_ESC=$(echo "$DATABASE_PASSWORD" | sed "s/'/''/g" | sed 's/\\/\\\\/g')
+    
+    # 使用 Node.js 创建管理员账号
+    # 注意：standalone 模式下，node_modules 可能在 /app/.next/standalone/node_modules
+    if docker exec pis-web sh -c "cd /app && NODE_PATH=/app/.next/standalone/node_modules:/app/node_modules:/app/apps/web/node_modules node -e \"
+const crypto = require('crypto');
+const { promisify } = require('util');
+const pbkdf2 = promisify(crypto.pbkdf2);
+const { Client } = require('pg');
+
+(async () => {
+  const email = '$ADMIN_EMAIL_ESC';
+  const password = '$ADMIN_PASSWORD_ESC';
+  
+  // 连接数据库
+  const client = new Client({
+    host: 'postgres',
+    port: 5432,
+    database: '${DATABASE_NAME:-pis}',
+    user: '${DATABASE_USER:-pis}',
+    password: '$DB_PASSWORD_ESC'
+  });
+  
+  await client.connect();
+  
+  try {
+    // 检查用户是否存在
+    const checkResult = await client.query('SELECT id FROM users WHERE email = \$1', [email.toLowerCase()]);
+    
+    if (checkResult.rows.length > 0) {
+      // 用户已存在，更新密码（如果提供了密码）
+      if (password && password.trim() !== '') {
+        // 哈希密码
+        const salt = crypto.randomBytes(32).toString('hex');
+        const iterations = 100000;
+        const keylen = 64;
+        const digest = 'sha512';
+        const derivedKey = await pbkdf2(password, salt, iterations, keylen, digest);
+        const passwordHash = \`\${salt}:\${iterations}:\${derivedKey.toString('hex')}\`;
+        await client.query('UPDATE users SET password_hash = \$1, updated_at = NOW() WHERE email = \$2', [passwordHash, email.toLowerCase()]);
+        console.log('✅ 管理员密码已更新');
+      } else {
+        console.log('✅ 管理员账户已存在（密码未设置，首次登录时设置）');
+      }
+    } else {
+      // 创建新用户
+      let passwordHash = null;
+      if (password && password.trim() !== '') {
+        // 哈希密码
+        const salt = crypto.randomBytes(32).toString('hex');
+        const iterations = 100000;
+        const keylen = 64;
+        const digest = 'sha512';
+        const derivedKey = await pbkdf2(password, salt, iterations, keylen, digest);
+        passwordHash = \`\${salt}:\${iterations}:\${derivedKey.toString('hex')}\`;
+      }
+      // password_hash 允许为 NULL，表示首次登录需要设置密码
+      await client.query(
+        'INSERT INTO users (email, password_hash, role, is_active, created_at, updated_at) VALUES (\$1, \$2, \$3, \$4, NOW(), NOW())',
+        [email.toLowerCase(), passwordHash, 'admin', true]
+      );
+      if (passwordHash) {
+        console.log('✅ 管理员账户创建成功！');
+      } else {
+        console.log('✅ 管理员账户创建成功！（首次登录时设置密码）');
+      }
+    }
+    console.log(\`   邮箱: \${email}\`);
+  } finally {
+    await client.end();
+  }
+})().catch(err => {
+  console.error('❌ 错误:', err.message);
+  process.exit(1);
+});
+" 2>&1; then
         print_success "管理员账号创建成功！"
         echo ""
         echo -e "${GREEN}═══════════════════════════════════════${NC}"
@@ -870,9 +1043,17 @@ create_admin_account() {
         echo -e "${GREEN}═══════════════════════════════════════${NC}"
         echo ""
         echo -e "${BOLD}邮箱:${NC} $ADMIN_EMAIL"
-        echo -e "${BOLD}密码:${NC} $ADMIN_PASSWORD"
-        echo ""
-        echo -e "${YELLOW}⚠️  请妥善保管以上信息！${NC}"
+        if [ -n "$ADMIN_PASSWORD" ]; then
+            echo -e "${BOLD}密码:${NC} $ADMIN_PASSWORD"
+            echo ""
+            echo -e "${YELLOW}⚠️  请妥善保管以上信息！${NC}"
+        else
+            echo -e "${BOLD}密码:${NC} 首次登录时设置"
+            echo ""
+            echo -e "${CYAN}📝 提示：${NC}"
+            echo "  访问登录页面后，输入邮箱地址"
+            echo "  系统会提示您设置初始密码"
+        fi
         echo ""
         echo -e "${CYAN}登录地址：${NC}"
         if [ "$DOMAIN" != "localhost" ]; then
@@ -907,11 +1088,24 @@ create_admin_on_host() {
     export DATABASE_PORT="${DATABASE_PORT:-5432}"
     export DATABASE_NAME="${DATABASE_NAME:-pis}"
     export DATABASE_USER="${DATABASE_USER:-pis}"
-    export DATABASE_PASSWORD="${DATABASE_PASSWORD:-changeme}"
+    # 使用实际配置的密码，如果没有则提示错误
+    if [ -z "$DATABASE_PASSWORD" ]; then
+        print_error "数据库密码未配置，无法创建管理员账号"
+        echo ""
+        echo -e "${YELLOW}请手动创建管理员账号：${NC}"
+        echo "  1. 启动所有服务后执行："
+        echo "     $ cd $PROJECT_ROOT"
+        echo "     $ pnpm create-admin"
+        echo ""
+        echo "  2. 或使用 Docker 容器执行："
+        echo "     $ docker exec -it pis-web pnpm create-admin"
+        return 1
+    fi
+    export DATABASE_PASSWORD="$DATABASE_PASSWORD"
     
     # 在项目根目录执行脚本
-    if [ -f "$PROJECT_ROOT/scripts/create-admin.ts" ]; then
-        if cd "$PROJECT_ROOT" && pnpm exec tsx scripts/create-admin.ts "$ADMIN_EMAIL" "$ADMIN_PASSWORD" 2>/dev/null; then
+    if [ -f "$PROJECT_ROOT/scripts/utils/create-admin.ts" ]; then
+        if cd "$PROJECT_ROOT" && pnpm exec tsx scripts/utils/create-admin.ts "$ADMIN_EMAIL" "$ADMIN_PASSWORD" 2>/dev/null; then
             print_success "管理员账号创建成功！"
             echo ""
             echo -e "${GREEN}管理员信息：${NC}"
@@ -948,8 +1142,8 @@ main() {
     echo ""
     echo -e "${YELLOW}部署前请确保:${NC}"
     echo "  • 已安装 Docker 和 Docker Compose"
-    echo "  • 服务器端口 80 和 443 可用"
-    echo "  • 域名已解析到服务器（如果使用域名）"
+    echo "  • 服务器端口 8081 可用（HTTP 访问端口）"
+    echo "  • 域名已解析到服务器（如果使用域名和 SSL）"
     echo ""
 
     if ! get_confirm "是否继续？" "y"; then
@@ -977,13 +1171,40 @@ main() {
         echo ""
         print_step "10/11" "启动服务"
         echo ""
-        echo -e "${CYAN}正在启动 Docker 服务...${NC}"
         
         cd "$DOCKER_DIR"
+        
+        # 检查是否有旧容器冲突（所有容器都使用 pis- 前缀）
+        echo -e "${CYAN}检查是否有旧容器...${NC}"
+        local conflicting_containers=$(docker ps -a --format '{{.Names}}' | grep -E '^pis-(web|postgres|minio|minio-init|redis|worker)$' || true)
+        
+        if [ -n "$conflicting_containers" ]; then
+            print_warning "发现已存在的容器："
+            echo "$conflicting_containers" | sed 's/^/  - /'
+            echo ""
+            
+            if get_confirm "是否停止并删除旧容器？" "y"; then
+                echo "正在停止并删除旧容器..."
+                echo "$conflicting_containers" | xargs -r docker stop 2>/dev/null || true
+                echo "$conflicting_containers" | xargs -r docker rm 2>/dev/null || true
+                print_success "旧容器已清理"
+            else
+                print_warning "保留旧容器，如果启动失败请手动清理"
+            fi
+            echo ""
+        fi
+        
+        echo -e "${CYAN}正在启动 Docker 服务...${NC}"
         if $COMPOSE_CMD -f docker-compose.standalone.yml up -d 2>&1 | tee /tmp/docker-startup.log; then
             print_success "服务启动成功"
         else
             print_error "服务启动失败，请检查日志"
+            echo ""
+            echo -e "${YELLOW}故障排查：${NC}"
+            echo "  1. 查看启动日志: cat /tmp/docker-startup.log"
+            echo "  2. 查看容器状态: docker ps -a"
+            echo "  3. 查看容器日志: docker logs <容器名>"
+            echo "  4. 手动清理冲突容器: docker rm -f pis-web pis-postgres pis-minio pis-minio-init pis-redis pis-worker"
             exit 1
         fi
         

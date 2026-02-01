@@ -41,7 +41,8 @@ export function TemplateManager() {
       const res = await fetch('/api/admin/templates')
       const data = await res.json()
       if (res.ok) {
-        setTemplates(data.templates || [])
+        // API 返回格式是 { data: { templates: [...] } }
+        setTemplates(data.data?.templates || data.templates || [])
       }
     } catch (error) {
       console.error('加载模板失败:', error)

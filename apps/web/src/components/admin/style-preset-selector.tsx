@@ -34,10 +34,12 @@ export function StylePresetSelector({
   useEffect(() => {
     const loadPresets = async () => {
       try {
-        const res = await fetch('/api/admin/style-presets')
+        const res = await fetch('/api/admin/style-presets', {
+          cache: 'no-store', // 禁用缓存，确保获取最新数据
+        })
         const data = await res.json()
         if (res.ok) {
-          setPresets(data.presets || [])
+          setPresets(data.data?.presets || [])
         }
       } catch (error) {
         console.error('加载预设列表失败:', error)
@@ -59,7 +61,8 @@ export function StylePresetSelector({
 
   // 获取当前选择的预设 CSS 滤镜
   const currentFilter = useMemo(() => {
-    return getStylePresetCSSFilter(value ? { preset: value } : null)
+    const filter = getStylePresetCSSFilter(value ? { preset: value } : null)
+    return filter
   }, [value])
 
   if (loading) {
@@ -99,13 +102,14 @@ export function StylePresetSelector({
       {presetsByCategory.portrait.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-text-secondary mb-3">人物风格</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {presetsByCategory.portrait.map(preset => (
               <PresetCard
                 key={preset.id}
                 preset={preset}
                 selected={value === preset.id}
                 onSelect={() => onChange(preset.id)}
+                previewImage={previewImage}
               />
             ))}
           </div>
@@ -116,13 +120,14 @@ export function StylePresetSelector({
       {presetsByCategory.landscape.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-text-secondary mb-3">风景风格</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {presetsByCategory.landscape.map(preset => (
               <PresetCard
                 key={preset.id}
                 preset={preset}
                 selected={value === preset.id}
                 onSelect={() => onChange(preset.id)}
+                previewImage={previewImage}
               />
             ))}
           </div>
@@ -133,13 +138,14 @@ export function StylePresetSelector({
       {presetsByCategory.general.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-text-secondary mb-3">通用风格</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {presetsByCategory.general.map(preset => (
               <PresetCard
                 key={preset.id}
                 preset={preset}
                 selected={value === preset.id}
                 onSelect={() => onChange(preset.id)}
+                previewImage={previewImage}
               />
             ))}
           </div>
@@ -215,30 +221,66 @@ function PresetCard({
   preset,
   selected,
   onSelect,
+  previewImage,
 }: {
   preset: StylePreset
   selected: boolean
   onSelect: () => void
+  previewImage?: string
 }) {
+  const presetFilter = preset.cssFilter || 'none'
+  
   return (
     <button
       type="button"
       onClick={onSelect}
-      className={`p-3 rounded-lg border-2 transition-all text-left min-h-[44px] active:scale-[0.98] touch-manipulation ${
+      className={`rounded-lg border-2 transition-all text-left active:scale-[0.98] touch-manipulation overflow-hidden w-full ${
         selected
           ? 'border-primary bg-primary/10'
           : 'border-border hover:border-primary/50 active:bg-surface-elevated'
       }`}
     >
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="font-medium text-sm">{preset.name}</div>
-          {selected && (
-            <Check className="w-4 h-4 text-primary flex-shrink-0" />
-          )}
-        </div>
-        <div className="text-xs text-text-muted line-clamp-2">
-          {preset.description}
+      {/* 垂直布局：预览图在上，名称和描述在下 */}
+      <div className="flex flex-col">
+        {/* 预览图 */}
+        {previewImage ? (
+          <div className="relative w-full aspect-square rounded-t overflow-hidden border-b border-border bg-surface">
+            <Image
+              src={previewImage}
+              alt={preset.name}
+              fill
+              className="object-cover"
+              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
+              style={{
+                filter: presetFilter,
+                transition: 'filter 0.2s ease-out',
+              }}
+              unoptimized
+            />
+            {/* 选中标记 */}
+            {selected && (
+              <div className="absolute top-1.5 right-1.5 bg-primary text-primary-foreground rounded-full p-1 shadow-lg">
+                <Check className="w-3 h-3" />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="relative w-full aspect-square rounded-t bg-surface border-b border-border flex items-center justify-center">
+            <div className="text-xs text-text-muted text-center px-2">无预览</div>
+            {selected && (
+              <div className="absolute top-1.5 right-1.5 bg-primary text-primary-foreground rounded-full p-1 shadow-lg">
+                <Check className="w-3 h-3" />
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* 名称和描述 */}
+        <div className="p-2 space-y-0.5">
+          <div className="font-medium text-xs truncate">{preset.name}</div>
+          <div className="text-[10px] text-text-muted line-clamp-2 leading-tight">
+            {preset.description}
+          </div>
         </div>
       </div>
     </button>

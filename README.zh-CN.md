@@ -102,8 +102,27 @@
 
 ### 一键部署
 
+**🚀 真正的一键部署（完全自动化，无需交互）**
+
 ```bash
-# 一键安装（复制粘贴到终端执行）
+# 一条命令完成所有部署（无需任何交互）
+curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/one-click-deploy.sh | bash
+
+# 国内用户（使用代理加速）
+curl -sSL https://ghproxy.com/https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/one-click-deploy.sh | bash
+```
+
+此脚本会自动完成：
+- ✅ 自动安装 Docker 和 Docker Compose（如果未安装）
+- ✅ 自动克隆代码（如果不在项目目录）
+- ✅ 自动生成所有配置文件和安全密钥
+- ✅ 自动启动所有服务（PostgreSQL + MinIO + Redis + Web + Worker + Nginx）
+- ✅ 自动创建管理员账户（首次登录时设置密码）
+
+**📋 交互式部署（引导配置）**
+
+```bash
+# 交互式配置向导
 curl -sSL https://raw.githubusercontent.com/JunyuZhan/pis-standalone/main/scripts/install.sh | tr -d '\r' | bash
 
 # 国内用户（使用代理加速）
@@ -120,12 +139,13 @@ cd pis-standalone/docker
 bash deploy.sh
 ```
 
-引导程序会完成：
+交互式脚本会引导您完成：
 - ✅ 配置 PostgreSQL 数据库
 - ✅ 自动生成安全密钥
 - ✅ 配置存储（MinIO）
+- ✅ 配置域名和 SSL
 - ✅ 启动所有服务（PostgreSQL + MinIO + Redis + Web + Worker + Nginx）
-- ✅ 自动创建管理员账号
+- ✅ 创建管理员账号
 
 > 📖 **详细指南**: [部署文档](docs/i18n/zh-CN/DEPLOYMENT.md)
 

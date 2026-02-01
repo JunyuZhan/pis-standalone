@@ -6,15 +6,17 @@ import { Loader2, Save, Eye, EyeOff, Lock, Calendar, Download, Radio, Share2 } f
 import type { Database } from '@/types/database'
 import { MultiWatermarkManager, type WatermarkItem } from './multi-watermark-manager'
 import { StylePresetSelector } from './style-preset-selector'
+import { StorageChecker } from './storage-checker'
 import { showSuccess, handleApiError } from '@/lib/toast'
 
 type Album = Database['public']['Tables']['albums']['Row']
 
 interface AlbumSettingsFormProps {
   album: Album
+  coverOriginalKey?: string | null  // 封面照片的原图 key（用于风格预设预览）
 }
 
-export function AlbumSettingsForm({ album }: AlbumSettingsFormProps) {
+export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsFormProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -636,9 +638,9 @@ export function AlbumSettingsForm({ album }: AlbumSettingsFormProps) {
           value={formData.color_grading as string | null}
           onChange={(presetId) => handleChange('color_grading', presetId)}
           previewImage={
-            // 使用封面图作为预览图片
-            album.cover_photo_id && process.env.NEXT_PUBLIC_MEDIA_URL
-              ? `${process.env.NEXT_PUBLIC_MEDIA_URL.replace(/\/$/, '')}/processed/previews/${album.id}/${album.cover_photo_id}.jpg`
+            // 使用封面照片的原图作为预览图片（未应用风格预设，才能正确预览不同风格效果）
+            coverOriginalKey && process.env.NEXT_PUBLIC_MEDIA_URL
+              ? `${process.env.NEXT_PUBLIC_MEDIA_URL.replace(/\/$/, '')}/${coverOriginalKey.replace(/^\//, '')}`
               : undefined
           }
         />
@@ -733,6 +735,11 @@ export function AlbumSettingsForm({ album }: AlbumSettingsFormProps) {
             </span>
           </p>
         </div>
+      </section>
+
+      {/* 存储检查 */}
+      <section className="card space-y-4">
+        <StorageChecker albumId={album.id} />
       </section>
 
       {/* 提交按钮 */}

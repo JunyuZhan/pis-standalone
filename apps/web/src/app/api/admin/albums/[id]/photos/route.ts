@@ -61,8 +61,10 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     // 分页参数
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '50')
+    const pageRaw = searchParams.get('page') || '1'
+    const limitRaw = searchParams.get('limit') || '50'
+    const page = Math.max(1, parseInt(pageRaw) || 1) // 确保页码至少为1
+    const limit = Math.max(1, Math.min(100, parseInt(limitRaw) || 50)) // 限制在1-100之间
     const offset = (page - 1) * limit
 
     // 筛选参数
@@ -332,8 +334,6 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
                 result.status === 'rejected' ? result.reason : result.value.error)
             }
           })
-        } else {
-          console.log(`[Delete Photos] Successfully purged CDN cache for ${successCount} photos`)
         }
       } catch (error) {
         console.warn('[Delete Photos] Error purging CDN cache:', error)
@@ -405,7 +405,6 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         revalidatePath(`/api/public/albums/${albumData.slug}`)
         // 清除相册页面缓存
         revalidatePath(`/album/${albumData.slug}`)
-        console.log(`[Delete Photos] Cache revalidated for album: ${albumData.slug}`)
       } catch (revalidateError) {
         // 记录错误但不阻止删除操作
         console.warn('[Delete Photos] Failed to revalidate cache:', revalidateError)

@@ -405,10 +405,11 @@ function PhotoCard({
   // 在客户端生成 BlurHash data URL
   useEffect(() => {
     if (photo.blur_data && typeof window !== 'undefined') {
-      const dataURL = getBlurDataURL(photo.blur_data)
-      if (dataURL) {
-        setBlurDataURL(dataURL)
-      }
+      getBlurDataURL(photo.blur_data).then((dataURL) => {
+        if (dataURL) {
+          setBlurDataURL(dataURL)
+        }
+      })
     }
   }, [photo.blur_data])
 

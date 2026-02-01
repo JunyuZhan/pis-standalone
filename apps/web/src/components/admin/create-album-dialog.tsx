@@ -52,7 +52,7 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
       const res = await fetch('/api/admin/style-presets')
       const data = await res.json()
       if (res.ok) {
-        setPresets(data.presets || [])
+        setPresets(data.data?.presets || [])
       }
     } catch (error) {
       console.error('加载预设列表失败:', error)
@@ -64,7 +64,8 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
       const res = await fetch('/api/admin/templates')
       const data = await res.json()
       if (res.ok) {
-        setTemplates(data.templates || [])
+        // API 返回格式是 { data: { templates: [...] } }
+        setTemplates(data.data?.templates || data.templates || [])
       }
     } catch (error) {
       console.error('加载模板失败:', error)
@@ -87,7 +88,9 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
       if (templateId) {
         const templateRes = await fetch(`/api/admin/templates/${templateId}`)
         if (templateRes.ok) {
-          const template = await templateRes.json()
+          const templateData = await templateRes.json()
+          // API 返回格式是 { data: {...} }
+          const template = templateData.data || templateData
           templateConfig = {
             is_public: template.is_public,
             layout: template.layout,
@@ -100,23 +103,34 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
             watermark_enabled: template.watermark_enabled,
             watermark_type: template.watermark_type,
             watermark_config: template.watermark_config,
+            // 注意：模板目前不支持 color_grading，用户手动选择的风格优先
           }
         }
+      }
+
+      // 构建请求体
+      const requestBody: Record<string, unknown> = {
+        title: title.trim(),
+        description: description.trim(),
+        event_date: eventDate || null,
+        location: location.trim() || null,
+        // 用户手动选择的风格优先于模板配置
+        color_grading: stylePresetId ? { preset: stylePresetId } : null,
+      }
+
+      // 如果选择了模板，使用模板的配置；否则使用用户的选择
+      if (templateId) {
+        // 使用模板配置（模板配置已经包含了 allow_batch_download）
+        Object.assign(requestBody, templateConfig)
+      } else {
+        // 使用用户手动选择的配置
+        requestBody.allow_batch_download = allowBatchDownload
       }
 
       const res = await fetch('/api/admin/albums', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
-          event_date: eventDate || null,
-          location: location.trim() || null,
-          color_grading: stylePresetId ? { preset: stylePresetId } : null,  // 新增：调色配置
-          // 如果选择了模板，使用模板的配置；否则使用用户的选择
-          allow_batch_download: templateId ? undefined : allowBatchDownload,
-          ...templateConfig,
-        }),
+        body: JSON.stringify(requestBody),
       })
 
       const data = await res.json()
@@ -126,7 +140,9 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
         return
       }
 
-      setCreated(data)
+      // API 返回格式是 { data: {...} }
+      const createdData = data.data || data
+      setCreated(createdData)
     } catch {
       setError('创建失败，请重试')
     } finally {
@@ -162,7 +178,7 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent>
+      <DialogContent className="md:max-w-2xl lg:max-w-3xl">
         {!created ? (
           <>
             <DialogHeader>

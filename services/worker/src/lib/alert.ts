@@ -165,7 +165,6 @@ export class AlertService {
         throw new Error(data.description || 'Unknown error');
       }
 
-      console.log(`[Alert] Telegram notification sent: ${alert.title}`);
       return { success: true, channel: 'telegram' };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -224,7 +223,6 @@ export class AlertService {
         html,
       });
 
-      console.log(`[Alert] Email notification sent: ${alert.title}`);
       return { success: true, channel: 'email' };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

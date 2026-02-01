@@ -15,7 +15,7 @@ CREATE EXTENSION IF NOT EXISTS "pg_trgm";  -- 用于全文搜索
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(500) NOT NULL,
+    password_hash VARCHAR(500),  -- 允许 NULL，表示首次登录需要设置密码
     role VARCHAR(50) DEFAULT 'admin',  -- admin, viewer
     is_active BOOLEAN DEFAULT true,
     last_login_at TIMESTAMP WITH TIME ZONE,
@@ -37,13 +37,32 @@ CREATE TABLE IF NOT EXISTS albums (
     cover_photo_id UUID,
     photo_count INTEGER DEFAULT 0,
     password VARCHAR(255),  -- 相册访问密码（可选）
+    expires_at TIMESTAMP WITH TIME ZONE,  -- 相册过期时间
     is_public BOOLEAN DEFAULT false,
+    layout VARCHAR(50) DEFAULT 'masonry',
+    sort_rule VARCHAR(50) DEFAULT 'capture_desc',  -- 排序规则（capture_desc, capture_asc, manual）
+    allow_download BOOLEAN DEFAULT true,
+    allow_batch_download BOOLEAN DEFAULT false,
+    show_exif BOOLEAN DEFAULT true,
+    allow_share BOOLEAN DEFAULT true,
     watermark_enabled BOOLEAN DEFAULT false,
     watermark_type VARCHAR(50) DEFAULT 'text',
     watermark_config JSONB DEFAULT '{}',
     color_grading JSONB DEFAULT '{}',
-    layout VARCHAR(50) DEFAULT 'masonry',
-    sort_order VARCHAR(50) DEFAULT 'captured_at_desc',
+    -- 分享配置
+    share_title VARCHAR(255),
+    share_description TEXT,
+    share_image_url VARCHAR(500),
+    -- 海报配置
+    poster_image_url VARCHAR(500),
+    -- 活动元数据
+    event_date TIMESTAMP WITH TIME ZONE,  -- 活动时间（实际活动日期，区别于相册创建时间）
+    location TEXT,  -- 活动地点
+    -- 直播模式
+    is_live BOOLEAN DEFAULT false,
+    -- 统计
+    selected_count INTEGER DEFAULT 0,
+    view_count INTEGER DEFAULT 0,
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -72,9 +91,9 @@ CREATE TABLE IF NOT EXISTS photos (
     blur_data TEXT,                       -- BlurHash
     exif JSONB DEFAULT '{}',
     rotation INTEGER DEFAULT 0,           -- 旋转角度
-    sort_order INTEGER DEFAULT 0,
-    group_name VARCHAR(255),              -- 照片分组
+    sort_order INTEGER DEFAULT 0,         -- 手动排序顺序
     status VARCHAR(50) DEFAULT 'pending', -- pending, processing, completed, failed
+    is_selected BOOLEAN DEFAULT false,    -- 访客是否选中此照片
     captured_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -104,12 +123,70 @@ CREATE TABLE IF NOT EXISTS package_downloads (
     download_url TEXT,
     expires_at TIMESTAMP WITH TIME ZONE,
     completed_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_package_downloads_album_id ON package_downloads(album_id);
 CREATE INDEX IF NOT EXISTS idx_package_downloads_status ON package_downloads(status);
+
+-- ============================================
+-- 相册模板表
+-- ============================================
+CREATE TABLE IF NOT EXISTS album_templates (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_public BOOLEAN DEFAULT false,
+    layout VARCHAR(50) DEFAULT 'masonry',
+    sort_rule VARCHAR(50) DEFAULT 'capture_desc',
+    allow_download BOOLEAN DEFAULT true,
+    allow_batch_download BOOLEAN DEFAULT false,
+    show_exif BOOLEAN DEFAULT true,
+    password VARCHAR(255),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    watermark_enabled BOOLEAN DEFAULT false,
+    watermark_type VARCHAR(50),
+    watermark_config JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_album_templates_name ON album_templates(name);
+
+-- ============================================
+-- 照片分组表
+-- ============================================
+CREATE TABLE IF NOT EXISTS photo_groups (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    album_id UUID NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_photo_groups_album_id ON photo_groups(album_id);
+CREATE INDEX IF NOT EXISTS idx_photo_groups_sort_order ON photo_groups(album_id, sort_order);
+
+-- ============================================
+-- 照片分组关联表
+-- ============================================
+CREATE TABLE IF NOT EXISTS photo_group_assignments (
+    photo_id UUID NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    group_id UUID NOT NULL REFERENCES photo_groups(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    PRIMARY KEY (photo_id, group_id),
+    UNIQUE(group_id, photo_id)
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_photo_group_assignments_group_id ON photo_group_assignments(group_id);
+CREATE INDEX IF NOT EXISTS idx_photo_group_assignments_photo_id ON photo_group_assignments(photo_id);
 
 -- ============================================
 -- 辅助函数：增量更新相册照片数量
@@ -177,6 +254,27 @@ CREATE TRIGGER update_users_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+-- 为 album_templates 表创建触发器
+DROP TRIGGER IF EXISTS update_album_templates_updated_at ON album_templates;
+CREATE TRIGGER update_album_templates_updated_at
+    BEFORE UPDATE ON album_templates
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- 为 photo_groups 表创建触发器
+DROP TRIGGER IF EXISTS update_photo_groups_updated_at ON photo_groups;
+CREATE TRIGGER update_photo_groups_updated_at
+    BEFORE UPDATE ON photo_groups
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- 为 package_downloads 表创建触发器
+DROP TRIGGER IF EXISTS update_package_downloads_updated_at ON package_downloads;
+CREATE TRIGGER update_package_downloads_updated_at
+    BEFORE UPDATE ON package_downloads
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 -- ============================================
 -- 初始化完成提示
 -- ============================================
@@ -186,5 +284,8 @@ BEGIN
     RAISE NOTICE '   - users 表: 存储管理员账号（自定义认证模式）';
     RAISE NOTICE '   - albums 表: 存储相册信息';
     RAISE NOTICE '   - photos 表: 存储照片信息';
+    RAISE NOTICE '   - album_templates 表: 存储相册模板';
     RAISE NOTICE '   - package_downloads 表: 存储打包下载任务';
+    RAISE NOTICE '   - photo_groups 表: 存储照片分组';
+    RAISE NOTICE '   - photo_group_assignments 表: 存储照片分组关联';
 END $$;

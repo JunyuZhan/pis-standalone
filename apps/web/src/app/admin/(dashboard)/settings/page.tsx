@@ -1,9 +1,10 @@
 import { createClient } from '@/lib/database'
 import { getCurrentUser } from '@/lib/auth'
 import { redirect } from 'next/navigation'
-import { User, Mail, Database, Server, Globe, Lock, HardDrive, Calendar, FileText } from 'lucide-react'
+import { User, Mail, Database, Server, Globe, Lock, HardDrive, Calendar, FileText, CheckCircle2 } from 'lucide-react'
 import { ChangePasswordForm } from '@/components/admin/change-password-form'
 import { TemplateManager } from '@/components/admin/template-manager'
+import { ConsistencyChecker } from '@/components/admin/consistency-checker'
 
 export default async function SettingsPage() {
   const db = await createClient()
@@ -188,6 +189,15 @@ export default async function SettingsPage() {
           相册模板
         </h2>
         <TemplateManager />
+      </div>
+
+      {/* 数据一致性检查 */}
+      <div className="card">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <CheckCircle2 className="w-5 h-5 text-accent" />
+          数据一致性检查
+        </h2>
+        <ConsistencyChecker />
       </div>
 
       {/* 快速操作 */}

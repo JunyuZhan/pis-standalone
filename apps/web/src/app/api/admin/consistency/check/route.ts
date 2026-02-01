@@ -50,11 +50,12 @@ export async function POST(request: NextRequest) {
       batchSize = 100,
     } = bodyValidation.data
 
-    // 调用 Worker API 执行检查
+    // 调用 Worker API 执行检查（通过代理路由）
     const requestUrl = new URL(request.url)
     const protocol = requestUrl.protocol
     const host = requestUrl.host
-    const workerUrl = `http://localhost:3000/api/worker/consistency/check`
+    // 使用相对路径，通过代理路由转发到 Worker 服务
+    const workerUrl = `${protocol}//${host}/api/worker/consistency/check`
 
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -83,13 +84,33 @@ export async function POST(request: NextRequest) {
         return ApiError.internal(`检查失败: ${errorText}`)
       }
 
-      const result = await response.json()
+      const workerResult = await response.json()
+
+      // 转换 Worker 返回的结果格式为前端期望的格式
+      const result = workerResult.result || workerResult
+      
+      // 计算修复数量（标记为重新处理或删除的记录数）
+      const fixedCount = result.details?.inconsistentPhotos?.filter(
+        (p: any) => p.action === 'marked_for_reprocessing' || p.action === 'deleted_orphaned_record'
+      ).length || 0
+      
+      const formattedResult = {
+        success: true,
+        result: {
+          totalChecked: result.summary?.totalPhotos || 0,
+          inconsistencies: result.summary?.inconsistentRecords || 0,
+          fixed: fixedCount,
+          orphanedFiles: result.summary?.orphanedFiles || 0,
+          orphanedRecords: result.summary?.orphanedRecords || 0,
+          errors: result.errors || [],
+          // 添加详细信息
+          orphanedFilesDetails: result.details?.orphanedFiles || [],
+          inconsistentPhotosDetails: result.details?.inconsistentPhotos || [],
+        },
+      }
 
       // 返回检查结果
-      return NextResponse.json({
-        success: true,
-        result,
-      })
+      return NextResponse.json(formattedResult)
     } catch (fetchError) {
       const errorMsg = fetchError instanceof Error ? fetchError.message : 'Unknown error'
       console.error('Failed to call worker:', errorMsg)

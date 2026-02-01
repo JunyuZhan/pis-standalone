@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/database'
 import { getCurrentUser } from '@/lib/auth/api-helpers'
-import { getAlbumShareUrl } from '@/lib/utils'
+import { getAlbumShareUrl, generateAlbumSlug } from '@/lib/utils'
 import type { AlbumInsert, Json } from '@/types/database'
 import { createAlbumSchema } from '@/lib/validation/schemas'
 import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
@@ -53,8 +53,10 @@ export async function GET(request: NextRequest) {
     }
 
     // 分页参数
-    const page = parseInt(searchParams.get('page') || '1')
-    const limit = parseInt(searchParams.get('limit') || '50')
+    const pageRaw = searchParams.get('page') || '1'
+    const limitRaw = searchParams.get('limit') || '50'
+    const page = Math.max(1, parseInt(pageRaw) || 1) // 确保页码至少为1
+    const limit = Math.max(1, Math.min(100, parseInt(limitRaw) || 50)) // 限制在1-100之间
     const offset = (page - 1) * limit
 
     // 筛选参数
@@ -193,20 +195,30 @@ export async function POST(request: NextRequest) {
       watermark_type,
       watermark_config,
       color_grading,
+      password,
+      expires_at,
+      expiresAt,
     } = validation.data
 
     // 处理兼容性（支持两种命名方式）
     const finalIsPublic = is_public ?? isPublic ?? false
     const finalAllowBatchDownload = allow_batch_download ?? allowBatchDownload ?? false
+    const finalExpiresAt = expires_at ?? expiresAt ?? null
+
+    // 生成唯一的 slug
+    const slug = generateAlbumSlug()
 
     // 构建插入数据
     const insertData: AlbumInsert = {
       title: title.trim(),
+      slug, // 添加生成的 slug
       description: description?.trim() || null,
       event_date: event_date || null,
       location: location?.trim() || null,
       poster_image_url: poster_image_url || null,
       is_public: finalIsPublic,
+      password: password?.trim() || null,
+      expires_at: finalExpiresAt,
       layout: layout || 'masonry',
       sort_rule: sort_rule || 'capture_desc',
       allow_download: allow_download ?? true,

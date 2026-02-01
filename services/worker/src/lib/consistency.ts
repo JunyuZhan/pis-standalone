@@ -13,7 +13,7 @@
  */
 
 import { getStorageAdapter } from './storage/index.js';
-import { createClient } from '@supabase/supabase-js';
+import { getDatabaseAdapter } from './database/index.js';
 import { alertService } from './alert.js';
 
 interface PhotoRecord {
@@ -80,12 +80,11 @@ export interface ConsistencyCheckOptions {
  * 数据一致性检查类
  */
 export class ConsistencyChecker {
-  private supabase: ReturnType<typeof createClient>;
+  private db = getDatabaseAdapter();
   private storage = getStorageAdapter();
   private bucketName: string;
 
-  constructor(supabaseUrl: string, supabaseKey: string, bucketName: string) {
-    this.supabase = createClient(supabaseUrl, supabaseKey);
+  constructor(bucketName: string) {
     this.bucketName = bucketName;
   }
 
@@ -101,9 +100,6 @@ export class ConsistencyChecker {
       batchSize = 100,
       sendAlerts = true,
     } = options;
-
-    console.log('[Consistency] Starting consistency check...');
-    console.log('[Consistency] Options:', { autoFix, deleteOrphanedFiles, deleteOrphanedRecords, batchSize });
 
     const result: ConsistencyCheckResult = {
       timestamp: new Date().toISOString(),
@@ -124,21 +120,22 @@ export class ConsistencyChecker {
 
     try {
       // 1. 获取所有照片记录
-      const { data: photos, error: photosError } = await this.supabase
-        .from('photos')
-        .select('id, album_id, filename, original_key, thumb_key, preview_key, status')
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false }) as { data: PhotoRecord[] | null; error: any };
+      const photosResult = await this.db.findMany<PhotoRecord>('photos', {
+        deleted_at: null,
+      }, {
+        select: ['id', 'album_id', 'filename', 'original_key', 'thumb_key', 'preview_key', 'status'],
+        orderBy: [{ column: 'created_at', direction: 'desc' }],
+      });
 
-      if (photosError) {
-        throw new Error(`Failed to fetch photos: ${photosError.message}`);
+      if (photosResult.error) {
+        throw new Error(`Failed to fetch photos: ${photosResult.error.message}`);
       }
 
+      const photos = photosResult.data || [];
+
       result.summary.totalPhotos = photos?.length || 0;
-      console.log(`[Consistency] Found ${result.summary.totalPhotos} photos to check`);
 
       if (!photos || photos.length === 0) {
-        console.log('[Consistency] No photos found, check complete');
         result.duration = Date.now() - startTime;
         return result;
       }
@@ -148,7 +145,6 @@ export class ConsistencyChecker {
 
       for (let i = 0; i < photos.length; i += batchSize) {
         const batch = photos.slice(i, i + batchSize);
-        console.log(`[Consistency] Checking batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(photos.length / batchSize)}`);
 
         // 并行检查批次中的照片
         const batchResults = await Promise.all(
@@ -182,20 +178,18 @@ export class ConsistencyChecker {
 
             // 如果有问题，记录并尝试修复
             if (issues.length > 0) {
-              console.log(`[Consistency] Photo ${photo.id} has issues:`, issues.join(', '));
-
               const issueSummary = issues.join(', ');
 
               // 根据问题类型决定处理方式
               if (autoFix) {
                 if (photo.status === 'pending' && issues.includes('original_missing')) {
                   // pending 状态但原图缺失 = 上传失败，删除记录
-                  await this.supabase.from('photos').delete().eq('id', photo.id);
+                  await this.db.delete('photos', { id: photo.id });
                   action = 'deleted_orphaned_record';
                   result.summary.orphanedRecords++;
                 } else if (photo.status === 'completed') {
                   // completed 状态但文件缺失 = 标记为需要重新处理
-                  await (this.supabase.from('photos') as any).update({ status: 'pending' }).eq('id', photo.id);
+                  await this.db.update('photos', { id: photo.id }, { status: 'pending' });
                   action = 'marked_for_reprocessing';
                   result.summary.inconsistentRecords++;
                 }
@@ -224,7 +218,6 @@ export class ConsistencyChecker {
       result.details.inconsistentPhotos = inconsistentPhotos;
 
       // 3. 检查孤儿文件（存储中有但数据库没有的文件）
-      console.log('[Consistency] Checking for orphaned files...');
       const orphanedFiles = await this.findOrphanedFiles(photos);
       result.details.orphanedFiles = orphanedFiles.map(f => ({
         key: f.key,
@@ -234,11 +227,9 @@ export class ConsistencyChecker {
       result.summary.orphanedFiles = orphanedFiles.length;
 
       if (deleteOrphanedFiles && orphanedFiles.length > 0) {
-        console.log(`[Consistency] Deleting ${orphanedFiles.length} orphaned files...`);
         for (const file of orphanedFiles) {
           try {
             await this.storage.delete(file.key);
-            console.log(`[Consistency] Deleted orphaned file: ${file.key}`);
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : 'Unknown error';
             result.errors?.push(`Failed to delete ${file.key}: ${errorMsg}`);
@@ -253,26 +244,18 @@ export class ConsistencyChecker {
           .map((p) => p.photoId);
 
         if (orphanedRecordIds.length > 0) {
-          console.log(`[Consistency] Deleting ${orphanedRecordIds.length} orphaned records...`);
-          const { error: deleteError } = await this.supabase
-            .from('photos')
-            .delete()
-            .in('id', orphanedRecordIds);
-
-          if (deleteError) {
-            result.errors?.push(`Failed to delete orphaned records: ${deleteError.message}`);
-          } else {
-            result.summary.orphanedRecords = orphanedRecordIds.length;
+          // 批量删除孤儿记录
+          for (const id of orphanedRecordIds) {
+            const deleteResult = await this.db.delete('photos', { id });
+            if (deleteResult.error) {
+              result.errors?.push(`Failed to delete orphaned record ${id}: ${deleteResult.error.message}`);
+            }
           }
+          result.summary.orphanedRecords = orphanedRecordIds.length;
         }
       }
 
       result.duration = Date.now() - startTime;
-
-      console.log('[Consistency] Check complete:', {
-        duration: `${result.duration}ms`,
-        summary: result.summary,
-      });
 
       // 5. 发送告警（如果发现问题）
       if (sendAlerts && (result.summary.inconsistentRecords > 0 || result.summary.orphanedFiles > 0)) {
@@ -322,7 +305,13 @@ export class ConsistencyChecker {
       }
 
       // 找出孤儿文件（存储中有但数据库没有的）
+      // 过滤掉目录（以 / 结尾的路径）和空文件
       for (const file of allFiles) {
+        // 跳过目录（以 / 结尾）和空文件
+        if (file.key.endsWith('/') || file.size === 0) {
+          continue;
+        }
+        
         if (!databaseKeys.has(file.key)) {
           orphanedFiles.push({
             key: file.key,
@@ -374,15 +363,13 @@ export class ConsistencyChecker {
    */
   async repairPhoto(photoId: string): Promise<{ success: boolean; message: string }> {
     try {
-      const { data: photo, error } = await this.supabase
-        .from('photos')
-        .select('*')
-        .eq('id', photoId)
-        .single() as { data: PhotoRecord | null; error: any };
+      const photoResult = await this.db.findOne<PhotoRecord>('photos', { id: photoId });
 
-      if (error || !photo) {
+      if (photoResult.error || !photoResult.data) {
         return { success: false, message: '照片不存在' };
       }
+
+      const photo = photoResult.data;
 
       const issues: string[] = [];
 
@@ -417,12 +404,12 @@ export class ConsistencyChecker {
       // 尝试修复
       if (photo.status === 'pending' && issues.includes('原图缺失')) {
         // pending 状态但原图缺失，删除记录
-        await this.supabase.from('photos').delete().eq('id', photoId);
+        await this.db.delete('photos', { id: photoId });
         return { success: true, message: '已删除无效记录' };
       }
 
       // completed 状态但文件缺失，标记为 pending 重新处理
-      await (this.supabase.from('photos') as any).update({ status: 'pending' }).eq('id', photoId);
+      await this.db.update('photos', { id: photoId }, { status: 'pending' });
       return { success: true, message: '已标记为待处理' };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -432,6 +419,6 @@ export class ConsistencyChecker {
 }
 
 // 导出便捷函数
-export function createConsistencyChecker(supabaseUrl: string, supabaseKey: string, bucketName: string) {
-  return new ConsistencyChecker(supabaseUrl, supabaseKey, bucketName);
+export function createConsistencyChecker(bucketName: string) {
+  return new ConsistencyChecker(bucketName);
 }

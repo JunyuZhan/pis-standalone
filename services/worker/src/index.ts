@@ -54,9 +54,7 @@ try {
     fatal: (...args: any[]) => console.error(...args),
     debug: (...args: any[]) => console.debug(...args),
   };
-  if (envLoaded && loadedEnvPath) {
-    console.log('✅ Loaded environment variables from:', loadedEnvPath);
-  } else {
+  if (!envLoaded || !loadedEnvPath) {
     console.warn('⚠️  No .env file found. Tried paths:', envPaths.join(', '));
   }
 }
@@ -184,12 +182,7 @@ const CONFIG = {
 const WORKER_API_KEY = process.env.WORKER_API_KEY;
 if (!WORKER_API_KEY) {
   console.warn('⚠️  WORKER_API_KEY not set, API endpoints are unprotected!');
-    console.warn('   Please set WORKER_API_KEY in .env for production use');
-} else {
-  console.log('✅ WORKER_API_KEY configured (length:', WORKER_API_KEY.length, 'chars)');
-  if (CONFIG.IS_DEVELOPMENT) {
-    console.log('   API key preview:', WORKER_API_KEY.substring(0, 8) + '...');
-  }
+  console.warn('   Please set WORKER_API_KEY in .env for production use');
 }
 
 // CORS 配置
@@ -215,19 +208,7 @@ function authenticateRequest(req: http.IncomingMessage): boolean {
     ? apiKeyHeader[0]?.replace(/^Bearer\s+/i, '') || apiKeyHeader[0]
     : apiKeyHeader?.replace(/^Bearer\s+/i, '') || apiKeyHeader;
   
-  // 添加调试日志（仅在开发环境）
-  if (CONFIG.IS_DEVELOPMENT && !apiKey) {
-    console.warn('⚠️  API request without API key header. Worker requires WORKER_API_KEY but request did not include X-API-Key header.');
-    console.warn('   If you set WORKER_API_KEY in .env, make sure the frontend API route also sends it in the request.');
-  }
-  
   const isValid = apiKey === WORKER_API_KEY;
-  
-  if (!isValid && CONFIG.IS_DEVELOPMENT) {
-    const apiKeyPreview = typeof apiKey === 'string' ? apiKey.substring(0, 8) + '...' : 'none';
-    console.warn('⚠️  API key mismatch. Expected:', WORKER_API_KEY?.substring(0, 8) + '...', 'Received:', apiKeyPreview);
-    console.warn('   Make sure WORKER_API_KEY in .env matches the value expected by the worker service.');
-  }
   
   return isValid;
 }
@@ -326,13 +307,10 @@ async function parseJsonBody(
   }
 }
 
-console.log('🚀 PIS Worker Starting...');
-
 const worker = new Worker<PhotoJobData>(
   QUEUE_NAME,
   async (job: Job<PhotoJobData>) => {
     const { photoId, albumId, originalKey } = job.data;
-    console.log(`[${job.id}] Processing photo ${photoId} for album ${albumId}`);
 
     try {
       // 0. 使用条件更新（状态机锁）避免竞态条件
@@ -351,30 +329,73 @@ const worker = new Worker<PhotoJobData>(
       // 如果更新失败或没有影响行数，说明照片已被其他 worker 处理或不存在
       if (updateError || !updatedPhoto) {
         // 检查照片是否存在以及当前状态
-        const { data: existingPhoto } = await supabase
+        const { data: existingPhoto, error: queryError } = await supabase
           .from('photos')
-          .select('id, status')
+          .select('id, status, deleted_at, updated_at, rotation')
           .eq('id', photoId)
           .single();
         
         if (!existingPhoto) {
-          console.log(`[${job.id}] Photo record not found (likely cleaned up after upload failure), skipping`);
           return;
         }
         
-        if (existingPhoto.status === 'completed' || existingPhoto.status === 'failed') {
-          console.log(`[${job.id}] Photo already ${existingPhoto.status}, skipping`);
+        if (existingPhoto.status === 'completed') {
+          return;
+        }
+
+        let shouldProceed = false;
+
+        if (existingPhoto.status === 'failed') {
+          // 如果是 failed 状态，重新开始处理（更新状态为 processing）
+          const { error: retryError } = await supabase
+            .from('photos')
+            .update({ status: 'processing' })
+            .eq('id', photoId);
+            
+          if (retryError) {
+            console.error(`[${job.id}] Failed to retry photo:`, retryError.message);
+            throw retryError;
+          }
+          shouldProceed = true;
+        } else if (existingPhoto.status === 'processing') {
+          // 如果状态是 processing，检查是否超时（例如 5 分钟无更新）
+          const updatedTime = new Date(existingPhoto.updated_at).getTime();
+          const now = Date.now();
+          const timeoutMs = 5 * 60 * 1000; // 5分钟超时
+
+          if (now - updatedTime > timeoutMs) {
+            // 强制接管任务
+            const { error: takeoverError } = await supabase
+              .from('photos')
+              .update({ 
+                status: 'processing',
+                updated_at: new Date().toISOString() // 更新时间戳，防止其他 worker 再次接管
+              })
+              .eq('id', photoId);
+
+            if (takeoverError) {
+              console.error(`[${job.id}] Failed to takeover stuck photo:`, takeoverError.message);
+              throw takeoverError;
+            }
+            shouldProceed = true;
+          } else {
+            return;
+          }
+        }
+        
+        // 如果 deleted_at 不为 null，说明照片已被删除
+        if (existingPhoto.deleted_at) {
           return;
         }
         
-        // 如果状态是 processing，说明被其他 worker 处理中
-        if (existingPhoto.status === 'processing') {
-          console.log(`[${job.id}] Photo is being processed by another worker, skipping`);
+        // 如果上面处理了 failed 或接管了 processing，则不返回，继续执行
+        if (shouldProceed) {
+          // 使用现有照片数据作为 updatedPhoto
+          // @ts-ignore
+          updatedPhoto = existingPhoto;
+        } else {
           return;
         }
-        
-        console.log(`[${job.id}] Failed to update status, skipping`);
-        return;
       }
       
       // 获取照片的旋转角度（已在更新时查询）
@@ -421,7 +442,6 @@ const worker = new Worker<PhotoJobData>(
                 
                 // 如果照片是最近创建的（30秒内），等待5秒后重试一次
                 if (ageSeconds < 30) {
-                  console.log(`[${job.id}] File not found during download but photo is recent (${Math.round(ageSeconds)}s old), waiting 5s before retry...`);
                   await new Promise(resolve => setTimeout(resolve, 5000));
                   
                   // 重试下载
@@ -439,7 +459,6 @@ const worker = new Worker<PhotoJobData>(
                                               retryErr?.message?.includes('Unable to stat') ||
                                               retryErr?.message?.includes('Object does not exist');
                     if (retryIsFileNotFound) {
-                      console.log(`[${job.id}] File still not found after retry, cleaning up database record`);
                       try {
                         await supabase
                           .from('photos')
@@ -454,7 +473,6 @@ const worker = new Worker<PhotoJobData>(
                 }
               }
               
-              console.log(`[${job.id}] File not found during download, cleaning up database record`);
               try {
                 await supabase
                   .from('photos')
@@ -615,7 +633,7 @@ const worker = new Worker<PhotoJobData>(
         }
       };
 
-      const exifDateTime = result.exif?.exif?.DateTimeOriginal;
+      const exifDateTime = (result.exif as any)?.exif?.DateTimeOriginal;
       const capturedAt = parseExifDateTime(exifDateTime) || new Date().toISOString();
 
       // 7. 更新数据库
@@ -685,8 +703,6 @@ const worker = new Worker<PhotoJobData>(
       } else if (mediaUrl) {
         console.warn(`[${job.id}] Cloudflare API not configured (missing CLOUDFLARE_ZONE_ID or CLOUDFLARE_API_TOKEN), skipping cache purge`);
       }
-
-      console.log(`[${job.id}] Completed successfully`);
     } catch (err: any) {
       console.error(`[${job.id}] Failed:`, err);
       
@@ -719,7 +735,6 @@ const worker = new Worker<PhotoJobData>(
           
           // 如果照片是最近创建的（30秒内），等待5秒后重试一次
           if (ageSeconds < 30) {
-            console.log(`[${job.id}] File not found but photo is recent (${Math.round(ageSeconds)}s old), waiting 5s before retry...`);
             await new Promise(resolve => setTimeout(resolve, 5000));
             
             // 重试检查文件是否存在
@@ -728,23 +743,16 @@ const worker = new Worker<PhotoJobData>(
             
             if (retryFileExists) {
               // 文件现在存在了，重新抛出错误让 BullMQ 重试处理
-              console.log(`[${job.id}] File exists after retry, rethrowing error to trigger retry`);
               throw err;
             }
           }
         }
         
         // 文件不存在（或重试后仍然不存在），说明上传失败，尝试删除数据库记录（如果还存在）
-        console.log(`[${job.id}] File not found, deleting database record for photo ${photoId}`);
         const { error: deleteError } = await supabase
           .from('photos')
           .delete()
           .eq('id', photoId);
-        
-        if (deleteError) {
-          // 记录可能已经被 cleanup API 删除，这是正常的
-          console.log(`[${job.id}] Record may have been already deleted:`, deleteError.message);
-        }
         
         // 不抛出错误，避免重试（文件不存在时重试也没用）
         return;
@@ -805,8 +813,6 @@ worker.on('failed', async (job, err) => {
   }
 });
 
-console.log(`✅ Worker listening on queue: ${QUEUE_NAME}`);
-
 // ============================================
 // 打包下载 Worker
 // ============================================
@@ -816,7 +822,6 @@ const packageWorker = new Worker<PackageJobData>(
   'package-downloads',
   async (job: Job<PackageJobData>) => {
     const { packageId, albumId, photoIds, includeWatermarked, includeOriginal } = job.data;
-    console.log(`[Package ${job.id}] Processing package ${packageId} for album ${albumId}`);
 
     try {
       // 1. 更新状态为 processing
@@ -906,8 +911,6 @@ const packageWorker = new Worker<PackageJobData>(
           completed_at: new Date().toISOString(),
         })
         .eq('id', packageId);
-
-      console.log(`[Package ${job.id}] Completed successfully`);
     } catch (err: any) {
       console.error(`[Package ${job.id}] Failed:`, err);
 
@@ -929,8 +932,6 @@ const packageWorker = new Worker<PackageJobData>(
 packageWorker.on('failed', (job, err) => {
   console.error(`❌ Package job ${job?.id} failed:`, err.message);
 });
-
-console.log(`✅ Package worker listening on queue: package-downloads`);
 
 // ============================================
 // HTTP API 服务器 (用于接收上传请求)
@@ -1077,8 +1078,6 @@ const server = http.createServer(async (req, res) => {
     const key = url.searchParams.get('key');
     const contentType = req.headers['content-type'] || 'application/octet-stream';
     
-    console.log(`[Upload] Received upload request for key: ${key}`);
-    
     if (!key) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Missing key parameter' }));
@@ -1121,9 +1120,7 @@ const server = http.createServer(async (req, res) => {
       if (isAborted) return;
       try {
         const buffer = Buffer.concat(chunks);
-        console.log(`[Upload] Uploading ${buffer.length} bytes to storage: ${key}`);
         await uploadFile(key, buffer, { 'Content-Type': contentType });
-        console.log(`[Upload] Successfully uploaded: ${key}`);
         
         if (!isAborted) {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1212,7 +1209,6 @@ const server = http.createServer(async (req, res) => {
       const albumCache = getAlbumCache();
       albumCache.delete(albumId);
       
-      console.log(`[Clear Cache] Album cache cleared for: ${albumId}`);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, message: 'Album cache cleared' }));
     } catch (err: any) {
@@ -1251,13 +1247,11 @@ const server = http.createServer(async (req, res) => {
         // 尝试删除文件（如果不存在也不会报错）
         try {
           await deleteFile(key);
-          console.log(`[Cleanup] File deleted: ${key}`);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true, message: 'File deleted' }));
         } catch (deleteErr: any) {
           // 文件不存在时也返回成功（幂等操作）
           if (deleteErr?.code === 'NoSuchKey' || deleteErr?.message?.includes('does not exist')) {
-            console.log(`[Cleanup] File not found (already deleted): ${key}`);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, message: 'File not found (already deleted)' }));
           } else {
@@ -1293,9 +1287,7 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        console.log(`[Multipart] Initializing upload for key: ${key}`);
         const uploadId = await initMultipartUpload(key);
-        console.log(`[Multipart] Initialized upload for ${key}, uploadId: ${uploadId}`);
         
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ uploadId, key }));
@@ -1324,10 +1316,9 @@ const server = http.createServer(async (req, res) => {
       if (!key || !uploadId || !partNumber) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Missing key, uploadId, or partNumber' }));
-        return;
-      }
+          return;
+        }
 
-      console.log(`[Multipart] Generating presigned URL for part ${partNumber} of ${key}`);
       const presignedUrl = await getPresignedPartUrl(key, uploadId, partNumber, expirySeconds);
       
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1401,10 +1392,8 @@ const server = http.createServer(async (req, res) => {
       
       try {
         const buffer = Buffer.concat(chunks);
-        console.log(`[Multipart] Uploading part ${partNumber} for ${key}, size: ${buffer.length}`);
         
         const { etag } = await uploadPart(key, uploadId, partNumber, buffer);
-        console.log(`[Multipart] Part ${partNumber} uploaded, etag: ${etag}`);
         
         // 再次检查连接状态
         if (!isAborted && !res.destroyed && !res.writableEnded) {
@@ -1465,7 +1454,6 @@ const server = http.createServer(async (req, res) => {
         }
 
         await completeMultipartUpload(key, uploadId, parts);
-        console.log(`[Multipart] Completed upload for ${key}`);
         
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, key }));
@@ -1495,7 +1483,6 @@ const server = http.createServer(async (req, res) => {
         }
 
         await abortMultipartUpload(key, uploadId);
-        console.log(`[Multipart] Aborted upload for ${key}`);
         
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true }));
@@ -1679,8 +1666,6 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-        console.log(`[Scan] Starting scan for album: ${albumId}`);
-        
         // 1. 列出 sync/{albumId}/ 下的所有文件
         const prefix = `sync/${albumId}/`;
         const objects = await listObjects(prefix);
@@ -1697,8 +1682,6 @@ const server = http.createServer(async (req, res) => {
           const ext = keyLower.slice(lastDotIndex);
           return imageExtensions.includes(ext);
         });
-
-        console.log(`[Scan] Found ${imageObjects.length} images in ${prefix}`);
 
         // 限制批量处理大小，避免超时
         if (imageObjects.length > CONFIG.MAX_SCAN_BATCH_SIZE) {
@@ -1747,7 +1730,6 @@ const server = http.createServer(async (req, res) => {
               
               // 跳过已存在的文件
               if (existingFilenames.has(filename)) {
-                console.log(`[Scan] Skipping existing: ${filename}`);
                 skippedCount++;
                 return;
               }
@@ -1763,7 +1745,6 @@ const server = http.createServer(async (req, res) => {
               try {
                 // 复制文件到标准路径
                 await copyFile(obj.key, newKey);
-                console.log(`[Scan] Copied ${obj.key} -> ${newKey}`);
 
                 // 创建数据库记录
                 const { error: insertError } = await supabase
@@ -1812,8 +1793,6 @@ const server = http.createServer(async (req, res) => {
           );
         }
 
-        console.log(`[Scan] Added ${addedCount} new photos, skipped ${skippedCount}`);
-
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
           success: true, 
@@ -1843,7 +1822,8 @@ const server = http.createServer(async (req, res) => {
   // ============================================
 
   // 执行一致性检查
-  if (url.pathname === '/api/worker/consistency/check' && req.method === 'POST') {
+  // 支持两种路径：/api/consistency/check (通过代理) 和 /api/worker/consistency/check (直接调用)
+  if ((url.pathname === '/api/consistency/check' || url.pathname === '/api/worker/consistency/check') && req.method === 'POST') {
     try {
       const body = await parseJsonBody(req, CONFIG.MAX_BODY_SIZE);
       const {
@@ -1853,16 +1833,11 @@ const server = http.createServer(async (req, res) => {
         batchSize = 100,
       } = body;
 
-      console.log('[Consistency] Starting check with options:', { autoFix, deleteOrphanedFiles, deleteOrphanedRecords, batchSize });
-
       // 动态导入一致性检查模块
       const { createConsistencyChecker } = await import('./lib/consistency.js');
-      const consistencySupabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      const checker = createConsistencyChecker(
-        consistencySupabaseUrl,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        bucketName
-      );
+      
+      // 创建一致性检查器（使用数据库适配器，支持 PostgreSQL 和 Supabase）
+      const checker = createConsistencyChecker(bucketName);
 
       const result = await checker.check({
         autoFix,
@@ -1897,15 +1872,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      console.log(`[Consistency] Repairing photo: ${photoId}`);
-
       const { createConsistencyChecker } = await import('./lib/consistency.js');
-      const repairSupabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-      const checker = createConsistencyChecker(
-        repairSupabaseUrl,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        bucketName
-      );
+      
+      // 创建一致性检查器（使用数据库适配器，支持 PostgreSQL 和 Supabase）
+      const checker = createConsistencyChecker(bucketName);
 
       const result = await checker.repairPhoto(photoId);
 
@@ -1934,8 +1904,6 @@ const server = http.createServer(async (req, res) => {
 // ============================================
 async function recoverStuckProcessingPhotos() {
   try {
-    console.log('🔍 Checking for stuck processing photos...');
-    
     // 1. 查询所有状态为 processing 且超过阈值时间的照片
     const thresholdMs = CONFIG.STUCK_PHOTO_THRESHOLD_HOURS * 60 * 60 * 1000;
     const thresholdTime = new Date(Date.now() - thresholdMs).toISOString();
@@ -1951,11 +1919,8 @@ async function recoverStuckProcessingPhotos() {
     }
     
     if (!stuckPhotos || stuckPhotos.length === 0) {
-      console.log('✅ No stuck processing photos found');
       return;
     }
-    
-    console.log(`📋 Found ${stuckPhotos.length} photos stuck in processing state`);
     
     // 2. 检查队列中是否有对应的任务
     let waitingPhotoIds = new Set<string>();
@@ -1992,7 +1957,6 @@ async function recoverStuckProcessingPhotos() {
         if (updateError) {
           console.error(`❌ Failed to update photo ${photo.id}:`, updateError);
         } else {
-          console.log(`✅ Recovered completed photo: ${photo.id}`);
           alreadyCompletedCount++;
         }
       } else {
@@ -2012,7 +1976,6 @@ async function recoverStuckProcessingPhotos() {
               albumId: photo.album_id,
               originalKey: photo.original_key,
             });
-            console.log(`🔄 Requeued photo: ${photo.id}`);
             requeuedCount++;
           } catch (queueError) {
             console.error(`❌ Failed to requeue photo ${photo.id}:`, queueError);
@@ -2021,10 +1984,6 @@ async function recoverStuckProcessingPhotos() {
       }
       recoveredCount++;
     }
-    
-    console.log(`✅ Recovery completed: ${recoveredCount} photos processed`);
-    console.log(`   - ${alreadyCompletedCount} photos marked as completed`);
-    console.log(`   - ${requeuedCount} photos requeued`);
   } catch (err: any) {
     console.error('❌ Error during recovery:', err);
   }
@@ -2038,8 +1997,6 @@ async function recoverStuckProcessingPhotos() {
 // ============================================
 async function checkPendingPhotos(albumId?: string) {
   try {
-    console.log(`🔍 Checking pending photos${albumId ? ` for album ${albumId}` : ''}...`);
-    
     // 1. 查询 pending 状态的照片（可选：指定相册）
     let query = supabase
       .from('photos')
@@ -2078,8 +2035,6 @@ async function checkPendingPhotos(albumId?: string) {
     
     // 3. 检查每个 pending 照片的文件是否存在
     if (pendingPhotos && pendingPhotos.length > 0) {
-      console.log(`📋 Found ${pendingPhotos.length} pending photos to check`);
-      
       for (const photo of pendingPhotos) {
         // 如果已经在队列中，跳过
         if (queuedPhotoIds.has(photo.id)) {
@@ -2099,7 +2054,6 @@ async function checkPendingPhotos(albumId?: string) {
                 albumId: photo.album_id,
                 originalKey: photo.original_key,
               });
-              console.log(`🔄 Requeued pending photo with existing file: ${photo.id}`);
               requeuedCount++;
             } catch (queueError) {
               console.error(`❌ Failed to requeue photo ${photo.id}:`, queueError);
@@ -2113,7 +2067,6 @@ async function checkPendingPhotos(albumId?: string) {
             
             // 如果照片是最近创建的（30秒内），等待5秒后重试一次
             if (ageSeconds < 30) {
-              console.log(`⏳ Photo ${photo.id} is recent (${Math.round(ageSeconds)}s old), waiting 5s before retry...`);
               await new Promise(resolve => setTimeout(resolve, 5000));
               
               // 重试检查文件是否存在
@@ -2126,14 +2079,12 @@ async function checkPendingPhotos(albumId?: string) {
                     albumId: photo.album_id,
                     originalKey: photo.original_key,
                   });
-                  console.log(`🔄 Requeued pending photo after retry: ${photo.id}`);
                   requeuedCount++;
                 } catch (queueError) {
                   console.error(`❌ Failed to requeue photo ${photo.id} after retry:`, queueError);
                 }
               } else {
                 // 重试后文件仍然不存在，且照片创建时间超过30秒，清理数据库记录
-                console.log(`🧹 Cleaned up pending photo without file (age: ${Math.round(ageSeconds)}s): ${photo.id}`);
                 const { error: deleteError } = await supabase
                   .from('photos')
                   .delete()
@@ -2147,7 +2098,6 @@ async function checkPendingPhotos(albumId?: string) {
               }
             } else {
               // 照片创建时间超过30秒，文件不存在，说明上传失败，清理数据库记录
-              console.log(`🧹 Cleaned up pending photo without file (age: ${Math.round(ageSeconds)}s): ${photo.id}`);
               const { error: deleteError } = await supabase
                 .from('photos')
                 .delete()
@@ -2172,7 +2122,6 @@ async function checkPendingPhotos(albumId?: string) {
     // 4. 如果指定了相册，检查 MinIO 中是否有孤立文件（文件存在但数据库没有记录）
     if (albumId) {
       try {
-        console.log(`🔍 Checking for orphaned files in MinIO for album ${albumId}...`);
         const rawPrefix = `raw/${albumId}/`;
         const rawFiles = await listObjects(rawPrefix);
         
@@ -2192,8 +2141,6 @@ async function checkPendingPhotos(albumId?: string) {
           const orphanedFiles = rawFiles.filter(file => !dbPhotoKeys.has(file.key));
           
           if (orphanedFiles.length > 0) {
-            console.log(`📋 Found ${orphanedFiles.length} orphaned files in MinIO`);
-            
             // 为每个孤立文件创建数据库记录并加入处理队列
             for (const file of orphanedFiles) {
               try {
@@ -2235,10 +2182,9 @@ async function checkPendingPhotos(albumId?: string) {
                     await photoQueue.add('process-photo', {
                       photoId,
                       albumId,
-                      originalKey: file.key,
-                    });
-                    console.log(`🔄 Recovered orphaned file: ${file.key} (updated existing record)`);
-                    orphanedFilesCount++;
+                    originalKey: file.key,
+                  });
+                  orphanedFilesCount++;
                   }
                   continue;
                 }
@@ -2267,7 +2213,6 @@ async function checkPendingPhotos(albumId?: string) {
                   originalKey: file.key,
                 });
                 
-                console.log(`✅ Recovered orphaned file: ${file.key} (created new record)`);
                 orphanedFilesCount++;
               } catch (err: any) {
                 console.error(`❌ Error recovering orphaned file ${file.key}:`, err.message);
@@ -2279,20 +2224,6 @@ async function checkPendingPhotos(albumId?: string) {
         console.error('❌ Error checking orphaned files:', err.message);
         // 不抛出错误，继续返回其他结果
       }
-    }
-    
-    if (processedCount > 0 || orphanedFilesCount > 0) {
-      console.log(`✅ Pending check completed:`);
-      if (processedCount > 0) {
-        console.log(`   - ${processedCount} pending photos checked`);
-        console.log(`   - ${requeuedCount} photos requeued (file exists)`);
-        console.log(`   - ${cleanedCount} photos cleaned (file missing)`);
-      }
-      if (orphanedFilesCount > 0) {
-        console.log(`   - ${orphanedFilesCount} orphaned files recovered (file exists but no DB record)`);
-      }
-    } else {
-      console.log('✅ No pending photos or orphaned files found');
     }
     
     return {
@@ -2326,8 +2257,6 @@ async function checkFileExists(key: string): Promise<boolean> {
 // ============================================
 async function cleanupDeletedPhotos() {
   try {
-    console.log('🗑️  Cleaning up deleted photos...');
-    
     // 1. 查询所有 deleted_at 不为空且超过保留期的照片
     const retentionDays = CONFIG.DELETED_PHOTO_RETENTION_DAYS;
     const retentionDate = new Date();
@@ -2347,11 +2276,8 @@ async function cleanupDeletedPhotos() {
     }
     
     if (!deletedPhotos || deletedPhotos.length === 0) {
-      console.log('✅ No expired deleted photos to clean up');
       return;
     }
-    
-    console.log(`📋 Found ${deletedPhotos.length} expired deleted photos to clean up`);
     
     let filesDeletedCount = 0;
     let recordsDeletedCount = 0;
@@ -2409,16 +2335,11 @@ async function cleanupDeletedPhotos() {
           errorCount++;
         } else {
           recordsDeletedCount++;
-          console.log(`✅ Cleaned up deleted photo: ${photo.id} (deleted at: ${photo.deleted_at})`);
         }
       } catch (err: any) {
         console.error(`❌ Error cleaning up photo ${photo.id}:`, err.message);
         errorCount++;
       }
-    }
-    
-    if (recordsDeletedCount > 0 || filesDeletedCount > 0) {
-      console.log(`✅ Cleanup completed: ${recordsDeletedCount} records deleted, ${filesDeletedCount} files deleted${errorCount > 0 ? `, ${errorCount} errors` : ''}`);
     }
   } catch (err: any) {
     console.error('❌ Error during deleted photo cleanup:', err);
@@ -2434,8 +2355,6 @@ async function gracefulShutdown(signal: string) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   
-  console.log(`\n🛑 Received ${signal}, shutting down gracefully...`);
-  
   // 清理恢复定时器
   if (recoveryTimeout) {
     clearTimeout(recoveryTimeout);
@@ -2450,7 +2369,7 @@ async function gracefulShutdown(signal: string) {
   
   // 停止接受新请求
   server.close(() => {
-    console.log('✅ HTTP server closed');
+    // HTTP server closed
   });
   
   // 清理缓存定时器
@@ -2471,7 +2390,6 @@ async function gracefulShutdown(signal: string) {
         setTimeout(() => reject(new Error('Shutdown timeout')), CONFIG.SHUTDOWN_TIMEOUT_MS)
       )
     ]);
-    console.log('✅ All workers and queues closed');
   } catch (err: any) {
     if (err.message === 'Shutdown timeout') {
       console.warn('⚠️ Shutdown timeout, forcing exit');
@@ -2480,7 +2398,6 @@ async function gracefulShutdown(signal: string) {
     }
   }
   
-  console.log('✅ Graceful shutdown completed');
   process.exit(0);
 }
 
@@ -2503,8 +2420,23 @@ process.on('unhandledRejection', (reason, promise) => {
 server.keepAliveTimeout = 65000; // 65秒（略大于 Cloudflare 的 60 秒）
 server.headersTimeout = 66000; // 66秒（略大于 keepAliveTimeout）
 
-server.listen(HTTP_PORT, () => {
-  console.log(`🌐 HTTP API listening on port ${HTTP_PORT}`);
+server.listen(HTTP_PORT, async () => {
+  // 确保 MinIO bucket 存在（仅在 MinIO 存储类型时）
+  try {
+    const storageType = process.env.STORAGE_TYPE || 'minio';
+    if (storageType === 'minio') {
+      const storage = getStorageAdapter();
+      if (typeof (storage as any).ensureBucket === 'function') {
+        await (storage as any).ensureBucket();
+      }
+    }
+  } catch (err: any) {
+    console.error('❌ Failed to ensure storage bucket:', err.message);
+    if (err.stack) {
+      console.error('Stack:', err.stack);
+    }
+    // 不阻止服务启动，但记录错误
+  }
   
   // 启动后延迟5秒执行恢复（等待服务完全启动）
   recoveryTimeout = setTimeout(() => {
@@ -2518,6 +2450,5 @@ server.listen(HTTP_PORT, () => {
     deletedPhotoCleanupInterval = setInterval(() => {
       cleanupDeletedPhotos();
     }, CONFIG.DELETED_PHOTO_CLEANUP_INTERVAL_MS);
-    console.log(`🗑️  Deleted photo cleanup scheduled (interval: ${CONFIG.DELETED_PHOTO_CLEANUP_INTERVAL_MS / 1000 / 60} minutes)`);
   }, 10000);
 });

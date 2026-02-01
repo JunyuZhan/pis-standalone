@@ -139,7 +139,8 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should extract IP from x-forwarded-for header', async () => {
-    const { getAuthDatabase, verifyPassword, createSession } = await import('@/lib/auth')
+    const { getAuthDatabase, createSession } = await import('@/lib/auth')
+    const { verifyPassword } = await import('@/lib/auth/password')
     vi.mocked(getAuthDatabase).mockReturnValue({
       findUserByEmail: vi.fn().mockResolvedValue({
         id: '1',
@@ -205,7 +206,8 @@ describe('POST /api/auth/login', () => {
   })
 
   it('should handle short email in error logging', async () => {
-    const { getAuthDatabase, verifyPassword } = await import('@/lib/auth')
+    const { getAuthDatabase } = await import('@/lib/auth')
+    const { verifyPassword } = await import('@/lib/auth/password')
     vi.mocked(getAuthDatabase).mockReturnValue({
       findUserByEmail: vi.fn().mockResolvedValue(null),
     } as any)

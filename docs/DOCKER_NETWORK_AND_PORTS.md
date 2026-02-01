@@ -10,24 +10,28 @@
 
 ## 📊 当前端口暴露情况
 
-### Standalone 模式（有 Nginx 容器）
+### Standalone 模式（Nginx 功能已集成到 Web 容器）
 
 | 容器 | 暴露端口 | 绑定地址 | 说明 |
 |------|---------|---------|------|
-| `pis-nginx` | `8080:80` | `0.0.0.0` | ✅ **唯一对外暴露的端口**（配合内网穿透） |
-| ~~`pis-nginx`~~ | ~~`443:443`~~ | - | ❌ HTTPS 由内网穿透服务处理 |
-| `pis-postgres` | `127.0.0.1:5432:5432` | `127.0.0.1` | ⚠️ 仅本地访问（可选，用于调试） |
-| `pis-minio` | `127.0.0.1:9000:9000` | `127.0.0.1` | ⚠️ 仅本地访问（可选，用于调试） |
-| `pis-minio` | `127.0.0.1:9001:9001` | `127.0.0.1` | ⚠️ 仅本地访问（可选，用于调试） |
-| `pis-redis` | `127.0.0.1:6379:6379` | `127.0.0.1` | ⚠️ 仅本地访问（可选，用于调试） |
-| `pis-worker` | ❌ 无 | - | ✅ 仅内部网络访问 |
-| `pis-web` | ❌ 无 | - | ✅ 仅内部网络访问 |
+| `pis-web` | `8081:3000` | `0.0.0.0` | ✅ **唯一对外暴露的端口**（配合内网穿透） |
+| `pis-postgres` | ❌ 无 | - | ✅ 仅内部网络访问 |
+| `pis-minio` | ❌ 无 | - | ✅ 仅内部网络访问（通过 Next.js 代理） |
+| `pis-redis` | ❌ 无 | - | ✅ 仅内部网络访问 |
+| `pis-worker` | ❌ 无 | - | ✅ 仅内部网络访问（通过 Next.js 代理） |
 
 ### 结论
 
-✅ **是的，只需要暴露 80/443 端口！**
+✅ **是的，只需要暴露一个端口（8081）！**
 
-其他容器（`pis-web`、`pis-worker`、`pis-minio`）**不对外暴露端口**，通过 Docker 内部网络（`pis-network`）通信。
+所有服务通过 Next.js Web 容器统一入口访问：
+- `/` - Next.js 前端应用
+- `/api/` - Next.js API
+- `/media/` - MinIO 媒体文件（通过 Next.js API Route 代理）
+- `/minio-console/` - MinIO 管理控制台（通过 Next.js API Route 代理）
+- `/api/worker/` - Worker API（通过 Next.js API Route 代理）
+
+其他容器（`pis-postgres`、`pis-minio`、`pis-redis`、`pis-worker`）**不对外暴露端口**，通过 Docker 内部网络（`pis-network`）通信。
 
 ## 🔗 Docker 内部网络通信
 
@@ -36,12 +40,18 @@
 ```
 Internet
    ↓
-[80/443] pis-nginx (唯一对外端口)
+[8081] pis-web:3000 (唯一对外端口)
+   ↓
+Next.js API Routes (代理)
+   ├──→ /media/* → pis-minio:9000 (内部)
+   ├──→ /minio-console/* → pis-minio:9001 (内部)
+   └──→ /api/worker/* → pis-worker:3001 (内部)
    ↓
 Docker 内部网络 (pis-network)
-   ├──→ pis-web:3000 (内部)
-   ├──→ pis-worker:3001 (内部)
-   └──→ pis-minio:9000 (内部)
+   ├──→ pis-postgres:5432 (内部)
+   ├──→ pis-minio:9000/9001 (内部)
+   ├──→ pis-redis:6379 (内部)
+   └──→ pis-worker:3001 (内部)
 ```
 
 ### Nginx 配置示例
@@ -110,11 +120,11 @@ web:
 
 #### ✅ 必须暴露的端口
 
-**Nginx（唯一对外端口）**：
+**Web（唯一对外端口，集成 Nginx 功能）**：
 ```yaml
-nginx:
+web:
   ports:
-    - "8080:80"    # HTTP（配合 frpc/ddnsto 内网穿透）
+    - "8081:3000"    # HTTP（配合 frpc/ddnsto 内网穿透）
     # HTTPS 由内网穿透服务处理，不需要暴露 443
 ```
 
@@ -144,18 +154,32 @@ redis:
 
 #### ✅ 不暴露的端口（仅内部网络）
 
-**Web**：
+**PostgreSQL**：
 ```yaml
-web:
+postgres:
   # 无 ports 配置
-  # 通过 nginx 代理访问
+  # 仅内部网络访问
+```
+
+**MinIO**：
+```yaml
+minio:
+  # 无 ports 配置
+  # 通过 Next.js API Route 代理访问
+```
+
+**Redis**：
+```yaml
+redis:
+  # 无 ports 配置
+  # 仅内部网络访问
 ```
 
 **Worker**：
 ```yaml
 worker:
   # 无 ports 配置
-  # 通过 nginx 代理访问
+  # 通过 Next.js API Route 代理访问
 ```
 
 ## 🎯 最佳实践建议
@@ -165,25 +189,22 @@ worker:
 **完全隐藏内部服务**：
 ```yaml
 services:
-  nginx:
+  web:
     ports:
-      - "8080:80"    # HTTP（配合内网穿透）
+      - "8081:3000"    # HTTP（配合内网穿透）
       # HTTPS 由内网穿透服务处理
   
   postgres:
     # 不暴露端口，完全内部访问
   
   minio:
-    # 不暴露端口，通过 nginx 代理
+    # 不暴露端口，通过 Next.js API Route 代理
   
   redis:
     # 不暴露端口，完全内部访问
   
-  web:
-    # 不暴露端口，通过 nginx 代理
-  
   worker:
-    # 不暴露端口，通过 nginx 代理
+    # 不暴露端口，通过 Next.js API Route 代理
 ```
 
 **优点**：
@@ -253,28 +274,29 @@ docker exec pis-worker wget -O- http://pis-minio:9000/minio/health/live
 
 ### ✅ 核心答案
 
-**是的，有 `pis-nginx` 容器时，只需要暴露 80/443 端口！**
+**是的，只需要暴露一个端口（8081）！**
 
-- ✅ **唯一对外端口**: 80/443（Nginx）
+- ✅ **唯一对外端口**: 8081（Web 容器，集成 Nginx 功能）
 - ✅ **内部通信**: 所有容器通过 `pis-network` 内部网络通信
 - ✅ **容器名解析**: Docker DNS 自动解析容器名（如 `pis-web`、`pis-worker`）
+- ✅ **代理功能**: Next.js API Routes 代理媒体文件、MinIO Console、Worker API
 - ✅ **安全性**: 最小化攻击面，其他服务不对外暴露
 
 ### 📊 端口暴露对比
 
-| 服务 | 无 Nginx | 有 Nginx（当前） | 推荐 |
-|------|---------|-----------------|------|
-| Nginx | - | 8080（HTTP） | ✅ |
-| Web | 3000 | 无（内部） | ✅ |
-| Worker | 3001 | 无（内部） | ✅ |
-| MinIO | 9000/9001 | 无（内部）或 127.0.0.1 | ✅ |
-| PostgreSQL | 5432 | 无（内部）或 127.0.0.1 | ✅ |
-| Redis | 6379 | 无（内部）或 127.0.0.1 | ✅ |
+| 服务 | 无代理 | 当前（Next.js 集成） | 推荐 |
+|------|--------|---------------------|------|
+| Web | 3000 | 8081（HTTP） | ✅ |
+| Worker | 3001 | 无（通过 Next.js 代理） | ✅ |
+| MinIO | 9000/9001 | 无（通过 Next.js 代理） | ✅ |
+| PostgreSQL | 5432 | 无（内部） | ✅ |
+| Redis | 6379 | 无（内部） | ✅ |
 
 **注意**：HTTPS（443）由内网穿透服务（frpc/ddnsto）处理，PIS 容器内不需要暴露。
 
 ### 🎯 最佳实践
 
-1. **生产环境**: 只暴露 Nginx 的 80/443，其他服务完全内部访问
+1. **生产环境**: 只暴露 Web 容器的 8081，其他服务完全内部访问
 2. **开发环境**: 可选暴露调试端口（127.0.0.1），仅本地访问
 3. **安全原则**: 最小权限原则，只暴露必要的端口
+4. **代理功能**: 使用 Next.js API Routes 统一代理所有服务

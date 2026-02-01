@@ -484,7 +484,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
               while (partRetryCount < maxPartRetries) {
                 try {
                   // 1. 获取分片的 presigned URL（通过 Next.js API 路由）
-                  console.log(`[Upload] Requesting presigned URL for part ${j + 1}/${totalChunks}`)
                   const presignRes = await fetch('/api/worker/multipart/presign-part', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -526,7 +525,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
                   }
 
                   const { url: presignedUrl } = await presignRes.json()
-                  console.log(`[Upload] Uploading part ${j + 1}/${totalChunks} (${chunk.size} bytes) to MinIO`)
 
                   // 2. 直接上传分片到 MinIO（绕过 Vercel）
                   // 如果直接上传失败（网络错误、连接关闭等），回退到 Worker API 上传
@@ -541,8 +539,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
                         'Content-Type': 'application/octet-stream',
                       },
                     })
-
-                    console.log(`[Upload] Part ${j + 1}/${totalChunks} uploaded, status: ${partRes.status}`)
 
                     if (!partRes.ok) {
                       const errorText = await partRes.text()
@@ -559,13 +555,11 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
                   } catch (networkError) {
                     // 网络错误：ERR_CONNECTION_CLOSED, TypeError 等
                     console.warn(`[Upload] Network error when uploading to MinIO:`, networkError instanceof Error ? networkError.message : networkError)
-                    console.log(`[Upload] Falling back to Worker API upload`)
                     useWorkerFallback = true
                   }
 
                   // 回退到 Worker API 上传
                   if (useWorkerFallback) {
-                    console.log(`[Upload] Uploading part ${j + 1}/${totalChunks} via Worker API`)
                     const partRes = await fetch(
                       `/api/worker/multipart/upload?key=${encodeURIComponent(originalKey)}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${j + 1}`,
                       {
@@ -623,8 +617,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
           lastUploadedBytes = uploadedBytes
         }
         
-        console.log(`[Upload] Progress: ${completedChunks}/${totalChunks} (${progress}%), speed: ${speed > 0 ? formatSpeed(speed) : 'N/A'}`)
-        
         setFiles((prev) =>
           prev.map((f) =>
             f.id === uploadFile.id 
@@ -646,8 +638,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
         new Map(parts.map(p => [p.partNumber, p])).values()
       ).sort((a, b) => a.partNumber - b.partNumber)
 
-      console.log(`[Upload] Completing multipart upload: ${uniqueParts.length} parts, total chunks: ${totalChunks}`)
-      
       const completeRes = await fetch('/api/worker/multipart/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -904,8 +894,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
       // 特别是标记了 checkBeforeFail 的错误（上传到100%后连接关闭）
       if ((isNearComplete && err.retryable) || err.checkBeforeFail) {
         try {
-          console.log(`[Upload] Connection closed at ${progress}%, checking if file was uploaded successfully...`)
-          
           // 等待3秒后检查照片是否已经在数据库中（给 MinIO 和 Worker 一些时间处理）
           // Cloudflare 可能在文件上传完成后30秒内关闭连接，所以需要等待一下
           await new Promise(resolve => setTimeout(resolve, 3000))
@@ -917,7 +905,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
             const photoExists = data?.photos?.some((p) => p.id === photoId)
             if (photoExists) {
               // 文件已存在，上传成功，直接返回（不抛出错误）
-              console.log(`[Upload] ✅ File upload completed but connection closed, photo ${photoId} exists in database (completed)`)
               return
             }
           }
@@ -929,7 +916,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
             const photoPending = pendingData?.photos?.some((p) => p.id === photoId)
             if (photoPending) {
               // 照片在 pending 状态，说明上传成功但还在处理中，认为上传成功
-              console.log(`[Upload] ✅ File upload completed but connection closed, photo ${photoId} is pending processing`)
               return
             }
           }
@@ -940,12 +926,9 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
             const processingData = await processingRes.json() as { photos?: Array<{ id: string }> }
             const photoProcessing = processingData?.photos?.some((p) => p.id === photoId)
             if (photoProcessing) {
-              console.log(`[Upload] ✅ File upload completed but connection closed, photo ${photoId} is processing`)
               return
             }
           }
-          
-          console.log(`[Upload] ⚠️ File not found in database after connection closed, will retry or fail`)
         } catch (checkError) {
           // 检查失败，继续错误处理流程
           console.error('[Upload] Error checking file existence:', checkError)
@@ -998,7 +981,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
               await fetch(`/api/admin/photos/${photoId}/cleanup`, {
                 method: 'DELETE',
               })
-              console.log(`[Upload] Cleaned up old photoId ${photoId} after retry, using new photoId ${newPhotoId}`)
             } catch (cleanupErr) {
               console.warn(`[Upload] Failed to cleanup old photoId ${photoId} after retry:`, cleanupErr)
               // 继续重试，即使清理失败
@@ -1077,7 +1059,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
           })
           
           if (cleanupRes.ok) {
-            console.log(`[Upload] Cleaned up paused upload (already completed): ${currentFile.photoId}`)
             // 标记为失败（因为用户取消了）
             setFiles(prev => prev.map(f => 
               f.id === fileId ? { ...f, status: 'failed' as const, error: '已取消上传' } : f
@@ -1114,7 +1095,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
         })
         
         if (cleanupRes.ok) {
-          console.log(`[Upload] Cleaned up paused upload (progress 100%): ${currentFile.photoId}`)
           setFiles(prev => prev.map(f => 
             f.id === fileId ? { ...f, status: 'failed' as const, error: '已取消上传' } : f
           ))
@@ -1233,7 +1213,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
               method: 'DELETE',
             })
             if (cleanupRes.ok) {
-              console.log(`[Upload] Cleaned up photo record after credential failure: ${photoIdFromError}`)
             } else {
               // 清理失败，延迟检查 pending 照片
               setTimeout(() => {
@@ -1272,7 +1251,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
               method: 'DELETE',
             })
             if (cleanupRes.ok) {
-              console.log(`[Upload] Cleaned up photo record after credential error: ${credData.photoId}`)
             } else {
               // 清理失败，延迟检查 pending 照片
               setTimeout(() => {
@@ -1311,7 +1289,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
           await fetch(`/api/admin/photos/${photoId}/cleanup`, {
             method: 'DELETE',
           })
-          console.log(`[Upload] Cleaned up photo record after missing uploadUrl: ${photoId}`)
         } catch (cleanupErr) {
           console.error('[Upload] Failed to cleanup photo record after missing uploadUrl:', cleanupErr)
         }
@@ -1356,8 +1333,13 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
       // 从队列中移除已完成的文件
       uploadQueueRef.current = uploadQueueRef.current.filter(id => id !== uploadFile.id)
 
-      // 刷新页面数据（显示处理中的照片）
-      router.refresh()
+      // 通知父组件上传完成（触发照片列表刷新）
+      onComplete?.()
+      
+      // 延迟刷新页面数据，给照片列表加载一些时间
+      setTimeout(() => {
+        router.refresh()
+      }, 300)
     } catch (err) {
       // 检查是否是暂停导致的中断（使用函数式更新获取最新状态）
       let shouldSkip = false
@@ -1385,7 +1367,6 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
           })
           
           if (cleanupRes.ok) {
-            console.log(`[Upload] Cleaned up failed upload: ${photoId}`)
             cleanupSuccess = true
           } else {
             const errorData = await cleanupRes.json().catch(() => ({}))

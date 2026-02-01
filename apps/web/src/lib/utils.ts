@@ -1,15 +1,38 @@
+/**
+ * @fileoverview PIS Web - 通用工具函数
+ *
+ * @description 提供项目常用的工具函数，包括类名合并、日期格式化等
+ * @module lib/utils
+ */
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
 /**
  * 合并 Tailwind CSS 类名
+ *
+ * @description 使用 clsx 和 tailwind-merge 合并类名，自动处理冲突
+ * @param {...ClassValue[]} inputs 要合并的类名值
+ * @returns {string} 合并后的类名字符串
+ *
+ * @example
+ * ```typescript
+ * cn('px-2 py-1', 'bg-blue-500', isSelected && 'bg-blue-700')
+ * ```
  */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
 /**
- * 格式化文件大小
+ * 格式化文件大小为人类可读字符串
+ *
+ * @param {number} bytes 文件大小（字节）
+ * @returns {string} 格式化后的字符串（如 "1.5 MB"）
+ *
+ * @example
+ * ```typescript
+ * formatFileSize(1024) // "1 KB"
+ * ```
  */
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B'
@@ -20,7 +43,11 @@ export function formatFileSize(bytes: number): string {
 }
 
 /**
- * 格式化日期 - 使用固定格式避免 hydration 不匹配
+ * 将日期字符串或对象格式化为 "YYYY年MM月DD日" 格式
+ *
+ * @description 使用固定格式以避免服务端和客户端的 hydration 不匹配
+ * @param {string|Date} date 日期字符串或 Date 对象
+ * @returns {string} 格式化后的日期字符串
  */
 export function formatDate(date: string | Date): string {
   const d = new Date(date)
@@ -32,11 +59,14 @@ export function formatDate(date: string | Date): string {
 }
 
 /**
- * 格式化相对时间 - 使用固定格式避免 hydration 不匹配
- * 注意：此函数在服务器端和客户端可能返回不同结果，建议在客户端组件中使用
+ * 将日期格式化为相对时间字符串（如"5分钟前"）
+ *
+ * @description 服务端渲染时返回固定日期格式，避免 hydration 不匹配
+ * @param {string|Date} date 日期字符串或 Date 对象
+ * @returns {string} 相对时间字符串
  */
 export function formatRelativeTime(date: string | Date): string {
-  // 在服务器端渲染时，返回固定格式的日期以避免 hydration 不匹配
+  // 服务端渲染时，返回固定格式的日期以避免 hydration 不匹配
   if (typeof window === 'undefined') {
     return formatDate(date)
   }
@@ -58,8 +88,10 @@ export function formatRelativeTime(date: string | Date): string {
 }
 
 /**
- * 获取应用基础URL（用于生成分享链接）
- * 优先使用环境变量，否则使用 window.location.origin（客户端）或默认值（服务端）
+ * 获取应用基础 URL（用于生成分享链接）
+ *
+ * @description 优先使用环境变量，否则回退到 window.location.origin (客户端) 或默认值 (服务端)
+ * @returns {string} 基础 URL 字符串
  */
 export function getAppBaseUrl(): string {
   // 服务端：使用环境变量
@@ -71,15 +103,37 @@ export function getAppBaseUrl(): string {
 }
 
 /**
- * 生成相册分享URL
- * @param slug - 相册slug，会自动进行URL编码
+ * 生成相册分享 URL
+ *
+ * @param {string} slug 相册 slug（会自动进行 URL 编码）
+ * @returns {string} 完整的分享链接
+ * @throws {Error} 如果 slug 无效则抛出错误
  */
 export function getAlbumShareUrl(slug: string): string {
-  // 验证slug有效性
+  // 验证 slug 有效性
   if (!slug || typeof slug !== 'string' || slug.trim() === '') {
     throw new Error('Invalid album slug')
   }
-  // 对slug进行URL编码，防止特殊字符导致URL无效
+  // 对 slug 进行 URL 编码，防止特殊字符导致 URL 无效
   const encodedSlug = encodeURIComponent(slug.trim())
   return `${getAppBaseUrl()}/album/${encodedSlug}`
+}
+
+/**
+ * 生成唯一的相册 slug
+ *
+ * @description 使用时间戳和随机字符生成 12 位唯一标识符
+ * @returns {string} 生成的 slug（格式：字母数字组合）
+ *
+ * @example
+ * ```typescript
+ * const slug = generateAlbumSlug()
+ * // 返回类似 "a1b2c3d4e5f6" 的字符串
+ * ```
+ */
+export function generateAlbumSlug(): string {
+  // 使用 Base36 编码时间戳（更短）+ 随机后缀
+  const timestamp = Date.now().toString(36)
+  const randomPart = Math.random().toString(36).substring(2, 8)
+  return `${timestamp}${randomPart}`
 }

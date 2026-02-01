@@ -89,7 +89,6 @@ export async function purgeCloudflareCache(
           const result = (await response.json()) as { success: boolean; errors?: unknown[] }
           if (result.success) {
             purgedUrls.push(...batch)
-            console.log(`[Cloudflare Purge] Successfully purged ${batch.length} URLs`)
           } else {
             console.error('[Cloudflare Purge] API returned success=false:', result.errors)
             failedUrls.push(...batch)

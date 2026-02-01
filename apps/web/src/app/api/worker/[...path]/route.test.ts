@@ -9,17 +9,9 @@ import { GET, POST, PUT, DELETE } from './route'
 import { createMockRequest } from '@/test/test-utils'
 
 // Mock dependencies
-vi.mock('@/lib/supabase/server', () => {
-  const mockAuth = {
-    getUser: vi.fn(),
-  }
-
-  const mockSupabaseClient = {
-    auth: mockAuth,
-  }
-
+vi.mock('@/lib/auth/api-helpers', () => {
   return {
-    createClientFromRequest: vi.fn().mockReturnValue(mockSupabaseClient),
+    getCurrentUser: vi.fn(),
   }
 })
 
@@ -27,21 +19,18 @@ vi.mock('@/lib/supabase/server', () => {
 global.fetch = vi.fn()
 
 describe('Worker API Proxy', () => {
-  let mockAuth: any
-  let mockSupabaseClient: any
+  let mockGetCurrentUser: any
 
   beforeEach(async () => {
     vi.clearAllMocks()
     
-    const { createClientFromRequest } = await import('@/lib/database')
-    const mockRequest = createMockRequest('http://localhost:3000/api/worker/health')
-    mockSupabaseClient = createClientFromRequest(mockRequest)
-    mockAuth = mockSupabaseClient.auth
+    const { getCurrentUser } = await import('@/lib/auth/api-helpers')
+    mockGetCurrentUser = getCurrentUser as any
     
     // 默认用户已登录
-    mockAuth.getUser.mockResolvedValue({
-      data: { user: { id: 'user-123', email: 'test@example.com' } },
-      error: null,
+    mockGetCurrentUser.mockResolvedValue({
+      id: 'user-123',
+      email: 'test@example.com',
     })
 
     // 默认fetch成功
@@ -59,10 +48,7 @@ describe('Worker API Proxy', () => {
 
   describe('authentication', () => {
     it('should return 401 if user is not authenticated (non-health endpoint)', async () => {
-      mockAuth.getUser.mockResolvedValue({
-        data: { user: null },
-        error: null,
-      })
+      mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest('http://localhost:3000/api/worker/process', {
         method: 'POST',
@@ -77,10 +63,7 @@ describe('Worker API Proxy', () => {
     })
 
     it('should allow health endpoint without authentication', async () => {
-      mockAuth.getUser.mockResolvedValue({
-        data: { user: null },
-        error: null,
-      })
+      mockGetCurrentUser.mockResolvedValue(null)
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -98,8 +81,8 @@ describe('Worker API Proxy', () => {
 
       expect(response.status).toBe(200)
       expect(data.status).toBe('ok')
-      // 不应该调用 getUser
-      expect(mockAuth.getUser).not.toHaveBeenCalled()
+      // 不应该调用 getCurrentUser（health 端点不需要认证）
+      expect(mockGetCurrentUser).not.toHaveBeenCalled()
     })
   })
 

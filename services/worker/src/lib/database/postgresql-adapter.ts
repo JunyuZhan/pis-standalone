@@ -40,6 +40,17 @@ export class PostgreSQLAdapter implements DatabaseAdapter {
 
   /**
    * 构建 WHERE 子句
+   * 支持查询构建器的特殊键格式：
+   * - "column<" -> column < value
+   * - "column>" -> column > value
+   * - "column<=" -> column <= value
+   * - "column>=" -> column >= value
+   * - "!column" -> column != value
+   * - "!column:operator" -> NOT (column operator value)
+   * - "column?" -> column IS value
+   * - "column~" -> column LIKE value
+   * - "column~~" -> column ILIKE value
+   * - "column[]" -> column IN (values)
    */
   private buildWhereClause(filters: Record<string, any>): { clause: string; values: any[] } {
     const conditions: string[] = [];
@@ -47,15 +58,114 @@ export class PostgreSQLAdapter implements DatabaseAdapter {
     let paramIndex = 1;
 
     for (const [key, value] of Object.entries(filters)) {
-      const escapedKey = this.escapeIdentifier(key);
+      let column: string;
+      let operator: string;
+      let isNot = false;
+
+      // 解析特殊键格式
+      if (key.startsWith('!')) {
+        // 处理 "!column:operator" 格式（用于 not() 方法）
+        if (key.includes(':')) {
+          const parts = key.substring(1).split(':');
+          column = parts[0];
+          const op = parts[1];
+          
+          if (op === 'is') {
+            // NOT (column IS value)
+            const escapedColumn = this.escapeIdentifier(column);
+            if (value === null) {
+              conditions.push(`NOT (${escapedColumn} IS NULL)`);
+            } else {
+              conditions.push(`NOT (${escapedColumn} IS $${paramIndex++})`);
+              values.push(value);
+            }
+            continue;
+          } else {
+            // 其他操作符暂不支持，使用默认处理
+            column = key.substring(1);
+            operator = '!=';
+            isNot = false; // neq() 不需要额外的 NOT
+          }
+        } else {
+          // "!column" 格式（来自 neq()） -> column != value（不需要 NOT 包装）
+          column = key.substring(1);
+          operator = '!=';
+          isNot = false; // neq() 不需要额外的 NOT
+        }
+      } else if (key.endsWith('<')) {
+        column = key.slice(0, -1);
+        operator = '<';
+      } else if (key.endsWith('>')) {
+        column = key.slice(0, -1);
+        operator = '>';
+      } else if (key.endsWith('<=')) {
+        column = key.slice(0, -2);
+        operator = '<=';
+      } else if (key.endsWith('>=')) {
+        column = key.slice(0, -2);
+        operator = '>=';
+      } else if (key.endsWith('?')) {
+        // "column?" -> column IS value
+        column = key.slice(0, -1);
+        const escapedColumn = this.escapeIdentifier(column);
+        if (value === null) {
+          conditions.push(`${escapedColumn} IS NULL`);
+        } else {
+          conditions.push(`${escapedColumn} IS $${paramIndex++}`);
+          values.push(value);
+        }
+        continue;
+      } else if (key.endsWith('~')) {
+        // "column~" -> column LIKE value
+        column = key.slice(0, -1);
+        operator = 'LIKE';
+      } else if (key.endsWith('~~')) {
+        // "column~~" -> column ILIKE value
+        column = key.slice(0, -2);
+        operator = 'ILIKE';
+      } else if (key.endsWith('[]')) {
+        // "column[]" -> column IN (values)
+        column = key.slice(0, -2);
+        const escapedColumn = this.escapeIdentifier(column);
+        if (Array.isArray(value) && value.length > 0) {
+          const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
+          conditions.push(`${escapedColumn} IN (${placeholders})`);
+          values.push(...value);
+        } else {
+          // 空数组，使用 FALSE 条件
+          conditions.push('FALSE');
+        }
+        continue;
+      } else {
+        // 普通键，使用等号
+        column = key;
+        operator = '=';
+      }
+
+      const escapedColumn = this.escapeIdentifier(column);
+      
       if (value === null) {
-        conditions.push(`${escapedKey} IS NULL`);
+        if (operator === '=') {
+          conditions.push(`${escapedColumn} IS NULL`);
+        } else if (operator === '!=') {
+          conditions.push(`${escapedColumn} IS NOT NULL`);
+        } else {
+          // 其他操作符与 NULL 比较
+          conditions.push(`${escapedColumn} ${operator} NULL`);
+        }
       } else if (Array.isArray(value)) {
+        // 数组值，使用 IN
         const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
-        conditions.push(`${escapedKey} IN (${placeholders})`);
+        conditions.push(`${escapedColumn} IN (${placeholders})`);
         values.push(...value);
       } else {
-        conditions.push(`${escapedKey} = $${paramIndex++}`);
+        // 普通值
+        const condition = `${escapedColumn} ${operator} $${paramIndex++}`;
+        if (isNot) {
+          conditions.push(`NOT (${condition})`);
+        } else {
+          conditions.push(condition);
+        }
         values.push(value);
       }
     }
@@ -234,15 +344,31 @@ export class PostgreSQLAdapter implements DatabaseAdapter {
       const whereValues: any[] = [];
 
       for (const [key, value] of Object.entries(filters)) {
-        const escapedKey = this.escapeIdentifier(key);
-        if (value === null) {
-          whereConditions.push(`${escapedKey} IS NULL`);
+        // 处理特殊后缀：column? -> column IS value
+        let column = key;
+        let isNullCheck = false;
+        if (key.endsWith('?')) {
+          column = key.slice(0, -1);
+          isNullCheck = true;
+        }
+        
+        const escapedColumn = this.escapeIdentifier(column);
+        
+        if (isNullCheck) {
+          // "column?" -> column IS value
+          if (value === null) {
+            whereConditions.push(`${escapedColumn} IS NULL`);
+          } else {
+            whereConditions.push(`${escapedColumn} IS NOT NULL`);
+          }
+        } else if (value === null) {
+          whereConditions.push(`${escapedColumn} IS NULL`);
         } else if (Array.isArray(value)) {
           const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
-          whereConditions.push(`${escapedKey} IN (${placeholders})`);
+          whereConditions.push(`${escapedColumn} IN (${placeholders})`);
           whereValues.push(...value);
         } else {
-          whereConditions.push(`${escapedKey} = $${paramIndex++}`);
+          whereConditions.push(`${escapedColumn} = $${paramIndex++}`);
           whereValues.push(value);
         }
       }

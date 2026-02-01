@@ -39,22 +39,13 @@ DROP TABLE IF EXISTS users CASCADE;
 -- ============================================
 -- 删除所有函数和触发器
 -- ============================================
+-- 注意：使用 CASCADE 删除表时会自动删除关联的触发器和约束
+-- 但为了清晰，这里显式删除函数
 
--- 删除触发器
-DROP TRIGGER IF EXISTS update_albums_updated_at ON albums;
-DROP TRIGGER IF EXISTS update_photos_updated_at ON photos;
-DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-DROP TRIGGER IF EXISTS increment_photo_count_trigger ON photos;
-DROP TRIGGER IF EXISTS decrement_photo_count_trigger ON photos;
-DROP TRIGGER IF EXISTS increment_album_view_count_trigger ON albums;
-DROP TRIGGER IF EXISTS update_album_selected_count_trigger ON photos;
-
--- 删除函数
+-- 删除函数（CASCADE 会自动删除依赖的触发器）
 DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 DROP FUNCTION IF EXISTS increment_photo_count(UUID) CASCADE;
 DROP FUNCTION IF EXISTS decrement_photo_count(UUID) CASCADE;
-DROP FUNCTION IF EXISTS increment_album_view_count(UUID) CASCADE;
-DROP FUNCTION IF EXISTS update_album_selected_count() CASCADE;
 
 -- 恢复外键约束检查
 SET session_replication_role = 'origin';

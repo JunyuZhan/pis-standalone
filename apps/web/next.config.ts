@@ -11,7 +11,7 @@ const withNextIntl = createNextIntlPlugin()
 const nextConfig: NextConfig = {
   eslint: {
     // 构建时忽略 ESLint 错误（测试文件会被 ESLint 检查，但不应阻止构建）
-    ignoreDuringBuilds: false,
+    ignoreDuringBuilds: true,
   },
   typescript: {
     // 构建时忽略 TypeScript 错误
@@ -114,6 +114,9 @@ const nextConfig: NextConfig = {
   async headers() {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com'
     const isDev = process.env.NODE_ENV === 'development'
+    // 检查是否使用 HTTPS（本地开发或 HTTP 部署时应禁用 HSTS）
+    const isHttps = appUrl.startsWith('https://')
+    const shouldEnableHsts = !isDev && isHttps
     
     // 从环境变量获取媒体服务器域名，用于 CSP connect-src
     // 同时支持 HTTP 和 HTTPS，因为 presigned URL 可能使用不同协议
@@ -190,10 +193,10 @@ const nextConfig: NextConfig = {
             key: 'Referrer-Policy',
             value: 'strict-origin-when-cross-origin',
           },
-          {
-            key: 'Strict-Transport-Security',
-            value: isDev ? '' : 'max-age=31536000; includeSubDomains; preload',
-          },
+          // {
+          //   key: 'Strict-Transport-Security',
+          //   value: shouldEnableHsts ? 'max-age=31536000; includeSubDomains; preload' : '',
+          // },
         ].filter(header => header.value !== ''), // 过滤空值
       },
       {
@@ -220,10 +223,10 @@ const nextConfig: NextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=(), payment=()',
           },
-          {
-            key: 'Strict-Transport-Security',
-            value: isDev ? '' : 'max-age=31536000; includeSubDomains; preload',
-          },
+          // {
+          //   key: 'Strict-Transport-Security',
+          //   value: shouldEnableHsts ? 'max-age=31536000; includeSubDomains; preload' : '',
+          // },
           {
             key: 'Content-Security-Policy',
             value: isDev ? '' : `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src ${connectSrc} https://challenges.cloudflare.com; media-src 'self' blob: https:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none';`,
@@ -303,55 +306,13 @@ const nextConfig: NextConfig = {
       },
     ]
   },
-  // Webpack 优化配置
-  webpack: (config, { isServer }) => {
-    // 生产环境优化
-    if (!isServer && process.env.NODE_ENV === 'production') {
-      // 优化代码分割
-      config.optimization = {
-        ...config.optimization,
-        moduleIds: 'deterministic',
-        runtimeChunk: 'single',
-        splitChunks: {
-          chunks: 'all',
-          cacheGroups: {
-            default: false,
-            vendors: false,
-            // 框架代码单独打包
-            framework: {
-              name: 'framework',
-              chunks: 'all',
-              test: /(?<!node_modules.*)[\\/]node_modules[\\/](react|react-dom|scheduler|next)[\\/]/,
-              priority: 40,
-              enforce: true,
-            },
-            // 第三方库单独打包
-            lib: {
-              test: /[\\/]node_modules[\\/]/,
-              name(module: { context: string }) {
-                const packageName = module.context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/)?.[1]
-                return packageName ? `npm.${packageName.replace('@', '')}` : 'lib'
-              },
-              priority: 30,
-              minChunks: 1,
-              reuseExistingChunk: true,
-            },
-            // 公共代码
-            commons: {
-              name: 'commons',
-              minChunks: 2,
-              priority: 20,
-            },
-            // 共享代码
-            shared: {
-              name: 'shared',
-              minChunks: 2,
-              priority: 10,
-              reuseExistingChunk: true,
-            },
-          },
-        },
-      }
+  // Webpack 配置 - 仅设置必要的 fallback
+  webpack: (config) => {
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      fs: false,
+      net: false,
+      tls: false,
     }
     return config
   },

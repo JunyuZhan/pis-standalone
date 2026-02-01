@@ -7,19 +7,22 @@ name: pis
 # - PostgreSQL: 数据库
 # - MinIO: 对象存储
 # - Redis: 任务队列/缓存
-# - Web: Next.js 前端
+# - Web: Next.js 前端（集成代理功能）
 # - Worker: 图片处理服务
-# - Nginx: 反向代理
 #
 # 端口说明：
-# - 8081: Nginx (唯一对外暴露端口，所有服务通过路径访问)
+# - 8081: Web (Next.js 前端，唯一对外暴露端口)
+#   所有服务都通过 Next.js 的路径访问，不直接暴露端口：
 #   - / : Next.js 前端应用
 #   - /api/ : Next.js API
-#   - /media/ : MinIO 媒体文件
-#   - /minio-console/ : MinIO 管理控制台
-#   - /worker-api/ : Worker API（可选，建议限制访问）
+#   - /media/* : MinIO 媒体文件（通过 Next.js API Route 代理到 pis-minio:9000）
+#   - /minio-console/* : MinIO 管理控制台（通过 Next.js API Route 代理到 pis-minio:9001）
+#   - /api/worker/* : Worker API（通过 Next.js API Route 代理到 pis-worker:3001）
 #   - /health : 健康检查
-# 其他服务（PostgreSQL、MinIO、Redis）仅容器内访问，不暴露端口
+# 
+# 其他容器（PostgreSQL、MinIO、Redis、Worker）：
+# - ❌ 不暴露端口，仅 Docker 内部网络访问
+# - ✅ 通过 Next.js Web 容器的路径统一访问
 # ============================================
 
 networks:
@@ -34,15 +37,10 @@ volumes:
     name: pis_minio_data
   pis_redis_data:
     name: pis_redis_data
-  pis_nginx_logs:
-    name: pis_nginx_logs
   pis_worker_logs:
     name: pis_worker_logs
   pis_web_logs:
     name: pis_web_logs
-  # Let's Encrypt 证书（使用 certbot 时自动创建）
-  pis_certs:
-    name: pis_certs
 
 services:
   # ==================== 数据库 ====================
@@ -61,7 +59,7 @@ services:
       - pis_postgres_data:/var/lib/postgresql/data
       # 数据库初始化脚本（如果需要）
       - ./init-postgresql-db.sql:/docker-entrypoint-initdb.d/init-postgresql-db.sql:ro
-    # 不暴露端口，仅容器内访问（通过 nginx 路径访问管理界面）
+    # 不暴露端口，仅容器内访问（通过 Next.js Web 容器路径访问）
     restart: unless-stopped
     networks:
       - pis-network
@@ -83,7 +81,12 @@ services:
     volumes:
       - pis_minio_data:/data
     command: server /data --console-address ":9001"
-    # 不暴露端口，通过 nginx /minio-console/ 路径访问控制台
+    # 暴露端口用于直接上传（presigned URL 需要直接访问 MinIO）
+    # 19000: MinIO API（用于客户端直接上传，避免与其他项目冲突）
+    # 19001: MinIO Console（可选，也可通过 Next.js /minio-console/ 访问）
+    ports:
+      - "19000:9000"  # MinIO API，用于客户端直接上传
+      - "19001:9001"  # MinIO Console（可选）
     restart: unless-stopped
     networks:
       - pis-network
@@ -94,6 +97,7 @@ services:
       retries: 3
 
   # MinIO Bucket 初始化
+  # 注意：Worker 启动时会自动检查并创建 bucket，此容器作为备用初始化
   minio-init:
     image: minio/mc:latest
     container_name: pis-minio-init
@@ -111,17 +115,16 @@ services:
       /bin/sh -c "
       sleep 5;
       mc alias set pis http://minio:9000 $${MINIO_ACCESS_KEY} $${MINIO_SECRET_KEY};
-      mc mb pis/pis-photos --ignore-existing;
-      # 创建子目录并设置不同的访问权限
-      mc mb pis/pis-photos/processed --ignore-existing;
-      mc mb pis/pis-photos/raw --ignore-existing;
-      # 只公开 processed 目录（缩略图和预览图可以公开访问）
-      mc anonymous set download pis/pis-photos/processed/;
-      # raw 目录（原图）需要通过应用控制访问
-      mc anonymous set off pis/pis-photos/raw/;
+      mc mb pis/pis-photos --ignore-existing || true;
+      # 设置访问策略（注意：在对象存储中，raw/ 和 processed/ 是前缀，不是真正的目录）
+      # 只公开 processed 前缀的文件（缩略图和预览图可以公开访问）
+      mc anonymous set download pis/pis-photos/processed/ || true;
+      # raw 前缀的文件（原图）需要通过应用控制访问
+      mc anonymous set off pis/pis-photos/raw/ || true;
       echo 'MinIO bucket initialized with access policies';
       exit 0;
       "
+    restart: "no"  # 只运行一次，Worker 会负责确保 bucket 存在
 
   # ==================== 任务队列 ====================
   redis:
@@ -152,11 +155,12 @@ services:
       # 数据库连接模式（standalone 模式使用 PostgreSQL）
       - DATABASE_TYPE=${DATABASE_TYPE:-postgresql}
       # PostgreSQL 直连配置
+      # 注意：DATABASE_PASSWORD 和 POSTGRES_PASSWORD 从 env_file (../.env) 读取
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
       - DATABASE_NAME=${POSTGRES_DB:-pis}
       - DATABASE_USER=${POSTGRES_USER:-pis}
-      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      # DATABASE_PASSWORD 从 env_file 读取，不需要在这里设置
       # MinIO
       - MINIO_ENDPOINT_HOST=minio
       - MINIO_ENDPOINT_PORT=9000
@@ -180,8 +184,10 @@ services:
       - HTTP_PORT=3001
       - WORKER_API_KEY=${WORKER_API_KEY:-changeme}
       # 存储公网 URL
-      - STORAGE_PUBLIC_URL=${STORAGE_PUBLIC_URL:-https://${DOMAIN:-localhost}/media}
-      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-https://${DOMAIN:-localhost}/media}
+      # STORAGE_PUBLIC_URL: 用于读取文件（通过 Next.js 代理）
+      - STORAGE_PUBLIC_URL=${STORAGE_PUBLIC_URL:-http://${DOMAIN:-localhost}:8081/media}
+      # MINIO_PUBLIC_URL: 用于 presigned URL（客户端直接上传到 MinIO）
+      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-http://${DOMAIN:-localhost}:19000}
       # 告警配置
       - ALERT_ENABLED=${ALERT_ENABLED:-true}
       - ALERT_TYPE=${ALERT_TYPE:-log}
@@ -223,12 +229,13 @@ services:
       - AUTH_MODE=${AUTH_MODE:-custom}
       - AUTH_JWT_SECRET=${AUTH_JWT_SECRET}
       # 数据库连接（standalone 模式使用 PostgreSQL）
+      # 注意：DATABASE_PASSWORD 和 POSTGRES_PASSWORD 从 env_file (../.env) 读取
       - DATABASE_TYPE=${DATABASE_TYPE:-postgresql}
       - DATABASE_HOST=postgres
       - DATABASE_PORT=5432
       - DATABASE_NAME=${POSTGRES_DB:-pis}
       - DATABASE_USER=${POSTGRES_USER:-pis}
-      - DATABASE_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      # DATABASE_PASSWORD 从 env_file 读取，不需要在这里设置
       # 应用配置
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-https://${DOMAIN:-localhost}}
       - NEXT_PUBLIC_MEDIA_URL=${NEXT_PUBLIC_MEDIA_URL:-https://${DOMAIN:-localhost}/media}
@@ -238,6 +245,14 @@ services:
       - WORKER_URL=http://worker:3001
       - NEXT_PUBLIC_WORKER_URL=${NEXT_PUBLIC_WORKER_URL:-}
       - WORKER_API_KEY=${WORKER_API_KEY:-changeme}
+      # MinIO 配置（用于媒体文件和 MinIO Console 代理）
+      - MINIO_ENDPOINT_HOST=minio
+      - MINIO_ENDPOINT_PORT=9000
+      - MINIO_CONSOLE_PORT=9001
+      - MINIO_USE_SSL=false
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-pis-photos}
       # 会话密钥（必须设置）
       - ALBUM_SESSION_SECRET=${ALBUM_SESSION_SECRET}
       # 轮询配置（standalone 模式使用轮询实现实时更新）
@@ -248,6 +263,11 @@ services:
       - ENABLE_PRETTY_LOG=${ENABLE_PRETTY_LOG:-false}
     volumes:
       - pis_web_logs:/app/logs
+    ports:
+      # 唯一对外暴露端口，所有服务通过路径访问
+      # 如需修改端口避免冲突，请同时更新环境变量 NEXT_PUBLIC_APP_URL
+      - "8081:3000"    # HTTP 使用 8081（可根据服务器实际情况修改）
+      # HTTPS 由内网穿透服务处理，不需要暴露 443
     depends_on:
       postgres:
         condition: service_healthy
@@ -257,31 +277,20 @@ services:
     networks:
       - pis-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      # 使用 curl（Alpine 镜像默认包含，无需安装）
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
-  # ==================== Nginx 反向代理 ====================
-  nginx:
-    image: nginx:alpine
-    container_name: pis-nginx
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - pis_nginx_logs:/var/log/nginx
-      - pis_certs:/etc/letsencrypt:ro
-    ports:
-      # 唯一对外暴露端口，所有服务通过路径访问
-      # 如需修改端口避免冲突，请同时更新 nginx 配置中的 listen 端口
-      - "8081:80"    # HTTP 使用 8081（可根据服务器实际情况修改）
-      # HTTPS 由内网穿透服务处理，不需要暴露 443
-      # - "443:443"
-    depends_on:
-      - web
-      - minio
-      - worker
-    restart: unless-stopped
-    networks:
-      - pis-network
+  # ==================== Nginx 已移除 ====================
+  # Nginx 功能已集成到 Next.js Web 容器中
+  # - 媒体文件代理：/media/* -> /app/media/[...path]/route.ts
+  # - MinIO Console 代理：/minio-console/* -> /app/minio-console/[...path]/route.ts
+  # - Worker API 代理：/api/worker/* -> /app/api/worker/[...path]/route.ts
+  # 
+  # 注意：
+  # - MinIO Console 的 WebSocket 功能不支持通过 Next.js 代理
+  # - 如需访问 MinIO Console，可以临时暴露 MinIO Console 端口（仅本地访问）
+  #   或使用主机 Nginx 代理 MinIO Console

@@ -61,6 +61,8 @@ export interface Database {
           photo_count: number
           selected_count: number
           view_count: number
+          // 元数据
+          metadata: Json
           // 时间戳
           created_at: string
           updated_at: string
@@ -95,6 +97,7 @@ export interface Database {
           photo_count?: number
           selected_count?: number
           view_count?: number
+          metadata?: Json
           created_at?: string
           updated_at?: string
           deleted_at?: string | null
@@ -128,6 +131,7 @@ export interface Database {
           photo_count?: number
           selected_count?: number
           view_count?: number
+          metadata?: Json
           created_at?: string
           updated_at?: string
           deleted_at?: string | null

@@ -1,9 +1,14 @@
 /**
- * Supabase 数据库适配器工厂测试
+ * 数据库适配器工厂测试
+ * 
+ * PIS Standalone 支持两种数据库后端：
+ * - PostgreSQL（默认，内网/自托管部署）
+ * - Supabase（可选，向后兼容）
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createDatabaseAdapter, getDatabaseAdapter, getSupabaseClient } from './index.js';
 import { SupabaseAdapter } from './supabase-adapter.js';
+import { PostgreSQLAdapter } from './postgresql-adapter.js';
 import type { DatabaseConfig } from './types.js';
 
 // Mock 适配器类
@@ -23,9 +28,28 @@ class MockSupabaseAdapter {
   async close() {}
 }
 
+class MockPostgreSQLAdapter {
+  constructor(public config: any) {}
+  
+  // 添加其他 DatabaseAdapter 方法以满足接口要求
+  async findOne() { return { data: null, error: null }; }
+  async findMany() { return { data: [], error: null }; }
+  async insert() { return { data: null, error: null }; }
+  async update() { return { data: null, error: null }; }
+  async delete() { return { data: null, error: null }; }
+  async count() { return { data: 0, error: null }; }
+  async close() {}
+}
+
 vi.mock('./supabase-adapter.js', () => ({
   SupabaseAdapter: vi.fn(function SupabaseAdapter(config: any) {
     return new MockSupabaseAdapter(config);
+  }),
+}));
+
+vi.mock('./postgresql-adapter.js', () => ({
+  PostgreSQLAdapter: vi.fn(function PostgreSQLAdapter(config: any) {
+    return new MockPostgreSQLAdapter(config);
   }),
 }));
 
@@ -37,7 +61,43 @@ describe('Database Adapter Factory', () => {
   });
 
   describe('createDatabaseAdapter', () => {
-    it('应该创建 Supabase 适配器', () => {
+    it('应该创建 PostgreSQL 适配器（默认）', () => {
+      const config: DatabaseConfig = {
+        type: 'postgresql',
+        host: 'localhost',
+        port: 5432,
+        database: 'pis',
+        user: 'pis',
+        password: 'password',
+      };
+
+      const adapter = createDatabaseAdapter(config);
+
+      expect(PostgreSQLAdapter).toHaveBeenCalledWith(config);
+      expect(adapter).toBeDefined();
+    });
+
+    it('应该从环境变量创建 PostgreSQL 适配器（默认）', () => {
+      const originalEnv = process.env;
+      process.env = {
+        ...originalEnv,
+        DATABASE_TYPE: 'postgresql',
+        DATABASE_HOST: 'localhost',
+        DATABASE_PORT: '5432',
+        DATABASE_NAME: 'pis',
+        DATABASE_USER: 'pis',
+        DATABASE_PASSWORD: 'password',
+      };
+
+      const adapter = createDatabaseAdapter();
+
+      expect(PostgreSQLAdapter).toHaveBeenCalled();
+      expect(adapter).toBeDefined();
+
+      process.env = originalEnv;
+    });
+
+    it('应该创建 Supabase 适配器（向后兼容）', () => {
       const config: DatabaseConfig = {
         type: 'supabase',
         supabaseUrl: 'https://test.supabase.co',
@@ -50,10 +110,11 @@ describe('Database Adapter Factory', () => {
       expect(adapter).toBeDefined();
     });
 
-    it('应该从环境变量创建 Supabase 适配器', () => {
+    it('应该从环境变量创建 Supabase 适配器（向后兼容）', () => {
       const originalEnv = process.env;
       process.env = {
         ...originalEnv,
+        DATABASE_TYPE: 'supabase',
         SUPABASE_URL: 'https://test.supabase.co',
         SUPABASE_SERVICE_ROLE_KEY: 'test-key',
       };
@@ -66,13 +127,13 @@ describe('Database Adapter Factory', () => {
       process.env = originalEnv;
     });
 
-    it('应该拒绝非 Supabase 配置', () => {
+    it('应该拒绝不支持的数据库类型', () => {
       const config = {
         type: 'invalid' as any,
       };
 
       expect(() => createDatabaseAdapter(config as DatabaseConfig)).toThrow(
-        'PIS only supports Supabase database'
+        'Unsupported database type: invalid. Supported types: \'supabase\', \'postgresql\''
       );
     });
   });

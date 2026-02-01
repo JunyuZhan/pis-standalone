@@ -1,13 +1,36 @@
 /**
  * PIS Web - 输入验证 Schema
- * 
+ *
  * 使用 Zod 定义所有 API 输入验证规则
- * 
- * @author junyuzhan <junyuzhan@outlook.com>
+ *
+ * @author PIS Contributors
  * @license MIT
+ *
+ * @description
+ * 包含以下验证 Schema：
+ * - 通用验证：UUID、Slug、Email、密码
+ * - 认证相关：登录、修改密码
+ * - 相册相关：创建、更新相册
+ * - 照片相关：上传、旋转、重新处理
+ * - 分组相关：创建、更新照片分组
+ * - 模板相关：创建、更新模板
+ * - 批量操作：批量删除、发布、更新
+ *
+ * @example
+ * ```typescript
+ * import { validate, safeValidate, loginSchema, createAlbumSchema } from '@/lib/validation/schemas'
+ *
+ * // 抛出错误的验证
+ * const data = validate(loginSchema, { email: 'user@example.com', password: 'pass' })
+ *
+ * // 安全验证（不抛出错误）
+ * const result = safeValidate(createAlbumSchema, requestBody)
+ * if (!result.success) {
+ *   return handleError(result.error, '输入验证失败')
+ * }
+ * ```
  */
-
-import { z } from 'zod';
+import { z } from 'zod'
 
 // ============================================
 // 通用验证规则
@@ -23,7 +46,16 @@ export const passwordSchema = z.string().min(8, '密码至少 8 个字符').max(
 // ============================================
 
 export const loginSchema = z.object({
-  email: emailSchema,
+  // 支持邮箱或用户名（admin）
+  email: z.string().min(1, '请输入邮箱或用户名').refine(
+    (val) => {
+      // 允许邮箱格式或用户名 "admin"
+      const isEmail = val.includes('@')
+      const isAdminUsername = val.toLowerCase() === 'admin'
+      return isEmail || isAdminUsername
+    },
+    { message: '请输入有效的邮箱地址或用户名 admin' }
+  ),
   password: z.string().min(1, '密码不能为空'),
 });
 
@@ -62,7 +94,8 @@ export const createAlbumSchema = z.object({
     preset: z.string().min(1).max(50),
   }).optional().or(z.null()),
   password: z.string().max(100, '密码最多 100 个字符').optional().or(z.null()),
-  expiresAt: z.string().datetime().optional().or(z.null()),
+  expires_at: z.string().datetime().optional().or(z.null()),
+  expiresAt: z.string().datetime().optional().or(z.null()), // 兼容 camelCase
   templateId: uuidSchema.optional().or(z.null()),
   stylePreset: z.string().max(50).optional().or(z.null()),
 }).refine((data) => {
@@ -346,13 +379,14 @@ export const consistencyCheckSchema = z.object({
   deleteOrphanedRecords: z.boolean().optional().default(false),
   batchSize: z.number().int().positive().max(1000).optional().default(100),
 }).refine((data) => {
-  // 如果启用删除孤儿文件或记录，必须启用自动修复
-  if ((data.deleteOrphanedFiles || data.deleteOrphanedRecords) && !data.autoFix) {
+  // 删除孤儿记录需要启用自动修复（因为涉及数据库操作）
+  // 但删除孤儿文件可以独立启用（只是删除存储中的文件）
+  if (data.deleteOrphanedRecords && !data.autoFix) {
     return false;
   }
   return true;
 }, {
-  message: '删除孤儿文件或记录需要启用 autoFix',
+  message: '删除孤儿记录需要启用自动修复',
   path: ['autoFix'],
 });
 

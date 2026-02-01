@@ -54,6 +54,9 @@ DROP POLICY IF EXISTS "Users can view own group assignments" ON photo_group_assi
 DROP POLICY IF EXISTS "Users can create group assignments" ON photo_group_assignments;
 DROP POLICY IF EXISTS "Users can delete group assignments" ON photo_group_assignments;
 
+-- 删除 package_downloads 表策略（补充）
+DROP POLICY IF EXISTS "Users can update package downloads" ON package_downloads;
+
 -- ============================================
 -- 删除所有表（按依赖顺序，CASCADE 会自动删除关联的触发器和约束）
 -- ============================================
