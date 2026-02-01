@@ -191,12 +191,12 @@ services:
       # STORAGE_PUBLIC_URL: 用于读取文件（通过 Next.js 代理）
       # 注意：env_file 中的值会被 environment 中的值覆盖
       # 如果 .env 文件中设置了 STORAGE_PUBLIC_URL，则使用该值；否则使用默认值
-      - STORAGE_PUBLIC_URL=${STORAGE_PUBLIC_URL}
+      - STORAGE_PUBLIC_URL=${STORAGE_PUBLIC_URL:-https://${DOMAIN:-localhost}/media}
       # MINIO_PUBLIC_URL: 在 standalone 模式下，应使用与 STORAGE_PUBLIC_URL 相同的值（通过 /media/ 代理）
       # 注意：presigned URL 实际上不能通过代理使用，但这里设置为相同值以避免 CSP 错误
       # 实际上，上传应该通过 Next.js API 代理，而不是直接使用 presigned URL
       # 如果 .env 文件中设置了 MINIO_PUBLIC_URL，则使用该值；否则使用 STORAGE_PUBLIC_URL 或默认值
-      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-${STORAGE_PUBLIC_URL}}
+      - MINIO_PUBLIC_URL=${MINIO_PUBLIC_URL:-${STORAGE_PUBLIC_URL:-https://${DOMAIN:-localhost}/media}}
       # 告警配置
       - ALERT_ENABLED=${ALERT_ENABLED:-true}
       - ALERT_TYPE=${ALERT_TYPE:-log}
