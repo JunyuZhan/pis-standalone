@@ -372,6 +372,13 @@ start_services() {
     
     if [ ! -d "$docker_dir" ]; then
         error "未找到 docker 目录: $docker_dir"
+        error ""
+        error "可能的原因："
+        error "  1. docker 目录未完整拉取，请检查: ls -la ${PROJECT_ROOT}/ | grep docker"
+        error "  2. 如果 docker 目录不存在，请重新拉取代码: git pull origin main"
+        error "  3. 或者手动创建 docker 目录并复制配置文件"
+        error ""
+        warn "跳过服务启动，请手动检查并启动服务"
         return 1
     fi
     
