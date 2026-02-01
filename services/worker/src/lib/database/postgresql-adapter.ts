@@ -334,7 +334,8 @@ export class PostgreSQLAdapter implements DatabaseAdapter {
       let paramIndex = 1;
 
       for (const field of updateFields) {
-        setClauses.push(`${field} = $${paramIndex++}`);
+        const escapedField = this.escapeIdentifier(field);
+        setClauses.push(`${escapedField} = $${paramIndex++}`);
         values.push((data as Record<string, any>)[field]);
       }
 
@@ -344,31 +345,15 @@ export class PostgreSQLAdapter implements DatabaseAdapter {
       const whereValues: any[] = [];
 
       for (const [key, value] of Object.entries(filters)) {
-        // 处理特殊后缀：column? -> column IS value
-        let column = key;
-        let isNullCheck = false;
-        if (key.endsWith('?')) {
-          column = key.slice(0, -1);
-          isNullCheck = true;
-        }
-        
-        const escapedColumn = this.escapeIdentifier(column);
-        
-        if (isNullCheck) {
-          // "column?" -> column IS value
-          if (value === null) {
-            whereConditions.push(`${escapedColumn} IS NULL`);
-          } else {
-            whereConditions.push(`${escapedColumn} IS NOT NULL`);
-          }
-        } else if (value === null) {
-          whereConditions.push(`${escapedColumn} IS NULL`);
+        const escapedKey = this.escapeIdentifier(key);
+        if (value === null) {
+          whereConditions.push(`${escapedKey} IS NULL`);
         } else if (Array.isArray(value)) {
           const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
-          whereConditions.push(`${escapedColumn} IN (${placeholders})`);
+          whereConditions.push(`${escapedKey} IN (${placeholders})`);
           whereValues.push(...value);
         } else {
-          whereConditions.push(`${escapedColumn} = $${paramIndex++}`);
+          whereConditions.push(`${escapedKey} = $${paramIndex++}`);
           whereValues.push(value);
         }
       }

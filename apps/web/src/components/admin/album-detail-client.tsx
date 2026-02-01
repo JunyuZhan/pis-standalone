@@ -264,21 +264,26 @@ export function AlbumDetailClient({ album, initialPhotos, mediaUrl: serverMediaU
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processingCount, showDeleted]) // loadPhotos 是稳定的函数，不需要添加到依赖
 
-  // 使用服务器端传递的 mediaUrl 作为初始值，避免 hydration mismatch
-  // 如果服务器端没有传递，则在客户端获取
-  const [mediaUrl, setMediaUrl] = useState<string>(serverMediaUrl || '')
+  // 在客户端直接使用 getSafeMediaUrl()，避免使用服务端可能传入的 https://localhost/media
+  // 这样可以确保客户端始终使用安全的媒体 URL（自动修复 localhost HTTPS 问题）
+  const [mediaUrl, setMediaUrl] = useState<string>(() => {
+    // 客户端初始化时直接使用 getSafeMediaUrl()
+    if (typeof window !== 'undefined') {
+      return getSafeMediaUrl()
+    }
+    // 服务端渲染时使用传入的值或默认值
+    return serverMediaUrl || '/media'
+  })
   
   useEffect(() => {
-    // 在客户端获取安全的媒体 URL（自动修复 localhost HTTPS 问题）
-    const safeClientMediaUrl = getSafeMediaUrl()
-    if (safeClientMediaUrl && safeClientMediaUrl !== mediaUrl) {
-      setMediaUrl(safeClientMediaUrl)
-    } else if (!mediaUrl && serverMediaUrl) {
-      // 如果客户端没有值但服务器端有值，使用服务器端的值（服务器端已经处理过）
-      // 但为了安全，再次使用 getSafeMediaUrl() 处理
-      setMediaUrl(getSafeMediaUrl())
+    // 在客户端确保使用安全的媒体 URL（自动修复 localhost HTTPS 问题）
+    if (typeof window !== 'undefined') {
+      const safeClientMediaUrl = getSafeMediaUrl()
+      if (safeClientMediaUrl !== mediaUrl) {
+        setMediaUrl(safeClientMediaUrl)
+      }
     }
-  }, [serverMediaUrl, mediaUrl])
+  }, [mediaUrl])
 
   // toggleSelection removed as it's not used
 
@@ -1310,15 +1315,15 @@ export function AlbumDetailClient({ album, initialPhotos, mediaUrl: serverMediaU
 
               {/* 操作按钮 (悬停显示) */}
               {!selectionMode && !isReordering && photo.thumb_key && (
-                <div className="absolute bottom-2 left-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 flex-nowrap">
+                <div className="absolute bottom-2 left-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 sm:gap-1.5 flex-nowrap overflow-hidden">
                   {coverPhotoId !== photo.id && (
                     <button
                       onClick={(e) => handleSetCover(photo.id, e)}
-                      className="bg-black/70 hover:bg-black/90 px-1.5 py-1 rounded-full text-[10px] text-white flex items-center justify-center gap-0.5 flex-shrink-0 whitespace-nowrap"
+                      className="bg-black/70 hover:bg-black/90 px-1.5 py-1 sm:px-2 sm:py-1.5 md:px-2.5 md:py-2 rounded-full text-[10px] sm:text-xs text-white flex items-center justify-center gap-0.5 flex-shrink min-w-0 whitespace-nowrap"
                       title="设为封面"
                     >
-                      <ImageIcon className="w-3 h-3 flex-shrink-0" />
-                      <span>设为封面</span>
+                      <ImageIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
+                      <span className="hidden sm:inline truncate">设为封面</span>
                     </button>
                   )}
                   {/* 重新处理按钮（仅已完成状态的照片） */}
@@ -1328,42 +1333,42 @@ export function AlbumDetailClient({ album, initialPhotos, mediaUrl: serverMediaU
                         e.stopPropagation()
                         handleReprocessSingle(photo.id)
                       }}
-                      className="bg-blue-500/80 hover:bg-blue-600 px-3 py-2.5 md:px-2 md:py-1.5 rounded-full text-white flex items-center justify-center gap-0.5 flex-shrink-0 whitespace-nowrap"
+                      className="bg-blue-500/80 hover:bg-blue-600 px-1.5 py-1 sm:px-2 sm:py-1.5 md:px-2.5 md:py-2 rounded-full text-[10px] sm:text-xs text-white flex items-center justify-center gap-0.5 flex-shrink min-w-0 whitespace-nowrap"
                       title="重新处理照片（应用当前相册风格设置）"
                     >
-                      <RefreshCw className="w-4 h-4 md:w-3 md:h-3" />
-                      <span className="hidden sm:inline">重新处理</span>
-                      <span className="sm:hidden">处理</span>
+                      <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
+                      <span className="hidden sm:inline truncate">重新处理</span>
+                      <span className="sm:hidden truncate">处理</span>
                     </button>
                   )}
                   {showDeleted ? (
                     <>
                       <button
                         onClick={(e) => handleRestorePhoto(photo.id, e)}
-                        className="bg-green-500/80 hover:bg-green-600 px-1.5 py-1 rounded-full text-[10px] text-white flex items-center justify-center gap-0.5 flex-shrink-0 whitespace-nowrap"
+                        className="bg-green-500/80 hover:bg-green-600 px-1.5 py-1 sm:px-2 sm:py-1.5 md:px-2.5 md:py-2 rounded-full text-[10px] sm:text-xs text-white flex items-center justify-center gap-0.5 flex-shrink min-w-0 whitespace-nowrap"
                         disabled={isRestoring}
                         title="恢复"
                       >
-                        <RestoreIcon className="w-3 h-3 flex-shrink-0" />
-                        <span>恢复</span>
+                        <RestoreIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
+                        <span className="hidden sm:inline truncate">恢复</span>
                       </button>
                       <button
                         onClick={(e) => handleDeletePhoto(photo.id, e)}
-                        className="bg-red-500/80 hover:bg-red-600 p-1.5 rounded-full text-white flex items-center justify-center flex-shrink-0"
+                        className="bg-red-500/80 hover:bg-red-600 p-1.5 sm:p-2 rounded-full text-white flex items-center justify-center flex-shrink-0 min-h-[28px] sm:min-h-[32px] min-w-[28px] sm:min-w-[32px]"
                         disabled={isDeleting}
                         title="永久删除"
                       >
-                        <Trash2 className="w-3 h-3 flex-shrink-0" />
+                        <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
                       </button>
                     </>
                   ) : (
                     <button
                       onClick={(e) => handleDeletePhoto(photo.id, e)}
-                      className="bg-red-500/80 hover:bg-red-600 p-1.5 rounded-full text-white flex items-center justify-center flex-shrink-0"
+                      className="bg-red-500/80 hover:bg-red-600 p-1.5 sm:p-2 rounded-full text-white flex items-center justify-center flex-shrink-0 min-h-[28px] sm:min-h-[32px] min-w-[28px] sm:min-w-[32px]"
                       disabled={isDeleting}
                       title="删除"
                     >
-                      <Trash2 className="w-3 h-3 flex-shrink-0" />
+                      <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0" />
                     </button>
                   )}
                 </div>

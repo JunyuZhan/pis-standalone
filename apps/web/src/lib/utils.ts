@@ -142,12 +142,7 @@ export function getInternalApiUrl(path: string): string {
 export function getSafeMediaUrl(): string {
   const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || ''
   
-  // 服务端：直接返回环境变量值
-  if (typeof window === 'undefined') {
-    return mediaUrl || '/media'
-  }
-  
-  // 客户端：修复 localhost HTTPS 问题
+  // 如果媒体 URL 为空，使用相对路径
   if (!mediaUrl) {
     return '/media'
   }
@@ -155,20 +150,21 @@ export function getSafeMediaUrl(): string {
   try {
     const url = new URL(mediaUrl)
     
-    // 如果 hostname 是 localhost 或 127.0.0.1，且协议是 https
-    // 但当前页面是 http，则转换为相对路径或使用当前页面协议
+    // 服务端和客户端都处理 localhost HTTPS 问题
+    // 如果 hostname 是 localhost 或 127.0.0.1，且协议是 https，转换为相对路径
     if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') && 
-        url.protocol === 'https:' && 
-        window.location.protocol === 'http:') {
-      // 使用相对路径，让浏览器自动使用当前页面的协议和域名
+        url.protocol === 'https:') {
+      // 对于 localhost HTTPS，使用相对路径更安全（避免连接被拒绝）
       return url.pathname || '/media'
     }
     
-    // 如果 hostname 是 localhost 且协议是 https，但当前页面也是 https
-    // 检查是否能访问，如果不能则回退到相对路径
-    if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') && 
-        url.protocol === 'https:') {
-      // 对于 localhost，通常使用相对路径更安全
+    // 客户端：如果 hostname 是 localhost 且协议是 https，但当前页面是 http
+    // 则转换为相对路径或使用当前页面协议
+    if (typeof window !== 'undefined' &&
+        (url.hostname === 'localhost' || url.hostname === '127.0.0.1') && 
+        url.protocol === 'https:' && 
+        window.location.protocol === 'http:') {
+      // 使用相对路径，让浏览器自动使用当前页面的协议和域名
       return url.pathname || '/media'
     }
     
