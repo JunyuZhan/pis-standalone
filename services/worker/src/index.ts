@@ -97,6 +97,8 @@ import { PhotoProcessor } from './processor.js';
 import { PackageCreator } from './package-creator.js';
 import { getAlbumCache, destroyAlbumCache } from './lib/album-cache.js';
 import { purgePhotoCache } from './lib/cloudflare-purge.js';
+import sharp from 'sharp';
+import { extractFaces } from './lib/face-recognition.js';
 import { alertService } from './lib/alert.js';
 import { db as supabase } from './lib/database/client.js';
 import { ftpServerService } from './ftp-server.js';
@@ -693,6 +695,53 @@ const worker = new Worker<PhotoJobData>(
         .eq('id', photoId);
 
       if (error) throw error;
+
+      // 8. 人脸识别 (异步执行，不阻塞)
+      if (finalStatus === 'completed') {
+        try {
+          // 创建旋转 pipeline
+          let facePipeline = sharp(processingBuffer);
+          if (photoRotation !== null && photoRotation !== undefined) {
+             facePipeline = facePipeline.rotate().rotate(photoRotation);
+          } else {
+             facePipeline = facePipeline.rotate();
+          }
+          
+          const faceImageBuffer = await facePipeline
+            .resize(800, null, { withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+            
+          const faces = await extractFaces(faceImageBuffer);
+          
+          if (faces.length > 0) {
+            const faceRecords = faces.map(face => ({
+              photo_id: photoId,
+              album_id: albumId,
+              embedding: `[${face.embedding.join(',')}]`,
+              face_location: {
+                x: face.bbox[0],
+                y: face.bbox[1],
+                w: face.bbox[2] - face.bbox[0],
+                h: face.bbox[3] - face.bbox[1]
+              }
+            }));
+            
+            const { error: faceError } = await supabase
+              .from('face_embeddings')
+              .insert(faceRecords);
+              
+            if (faceError) {
+              console.error(`[${job.id}] Failed to save face embeddings:`, faceError);
+            } else {
+              console.log(`[${job.id}] Saved ${faces.length} faces`);
+            }
+          }
+        } catch (faceErr) {
+          // 不阻塞主流程
+          console.error(`[${job.id}] Face recognition failed:`, faceErr);
+        }
+      }
 
       // 7. 优化：使用数据库函数增量更新相册照片数量，避免每次 COUNT 查询
       // 这样可以减少数据库负载，特别是在批量上传时

@@ -112,7 +112,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // 优化：只查询前端需要的字段，减少数据传输
     let query = db
       .from('photos')
-      .select('id, thumb_key, preview_key, original_key, filename, width, height, exif, blur_data, captured_at, is_selected, rotation, updated_at')
+      .select('id, thumb_key, preview_key, original_key, filename, width, height, exif, blur_data, captured_at, is_selected, rotation, updated_at', { count: 'exact' })
       .eq('album_id', album.id)
       .eq('status', 'completed')
       .is('deleted_at', null) // 排除已删除的照片
@@ -120,6 +120,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // 如果指定了分组，只查询分组中的照片
     if (photoIds) {
       query = query.in('id', photoIds)
+    }
+
+    // 如果指定了 ID 列表 (搜索)
+    const idsRaw = searchParams.get('ids')
+    if (idsRaw) {
+      const searchIds = idsRaw.split(',').filter(Boolean)
+      if (searchIds.length > 0) {
+        query = query.in('id', searchIds)
+      }
     }
 
     // 应用排序

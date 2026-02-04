@@ -9,7 +9,8 @@ import {
   Share2,
   X,
   LayoutGrid,
-  Grid
+  Grid,
+  ScanFace
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { SortRule } from './sort-toggle'
@@ -17,6 +18,7 @@ import type { LayoutMode } from './layout-toggle'
 import { showInfo, showError } from '@/lib/toast'
 import type { Album } from '@/types/database'
 import { cn, getAlbumShareUrl } from '@/lib/utils'
+import { FaceSearchModal } from './face-search-modal'
 
 interface FloatingActionsProps {
   album: Album
@@ -30,6 +32,7 @@ export function FloatingActions({ album, currentSort, currentLayout }: FloatingA
   const [isExpanded, setIsExpanded] = useState(false)
   const [showBackToTop, setShowBackToTop] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [showFaceSearch, setShowFaceSearch] = useState(false)
 
   // 确保只在客户端渲染
   useEffect(() => {
@@ -100,6 +103,24 @@ export function FloatingActions({ album, currentSort, currentLayout }: FloatingA
     setIsExpanded(false)
   }
 
+  // 处理人脸搜索结果
+  const handleFaceSearch = (photoIds: string[]) => {
+    if (photoIds.length === 0) return
+    
+    // 将结果存入 sessionStorage
+    const key = `face_search_${album.id}`
+    sessionStorage.setItem(key, JSON.stringify(photoIds))
+    
+    // 更新 URL 触发搜索模式
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('search', 'face')
+    router.push(`?${params.toString()}`, { scroll: false })
+    
+    setIsExpanded(false)
+  }
+
+  if (!mounted) return null
+
   return (
     <>
       {/* 浮动操作按钮组 - 只在客户端挂载后显示 */}
@@ -133,6 +154,24 @@ export function FloatingActions({ album, currentSort, currentLayout }: FloatingA
                 ) : (
                   <LayoutGrid className="w-4 h-4" />
                 )}
+              </motion.button>
+
+              {/* 人脸搜索按钮 */}
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => {
+                  setShowFaceSearch(true)
+                  setIsExpanded(false)
+                }}
+                className={cn(
+                  'w-10 h-10 rounded-full shadow-lg flex items-center justify-center',
+                  'bg-surface border border-border hover:bg-surface-elevated',
+                  'text-text-primary transition-all backdrop-blur-sm'
+                )}
+                title="找自己"
+              >
+                <ScanFace className="w-4 h-4" />
               </motion.button>
 
               {/* 排序按钮 */}
@@ -242,6 +281,16 @@ export function FloatingActions({ album, currentSort, currentLayout }: FloatingA
           </motion.div>
         </motion.button>
         </div>
+      )}
+
+      {/* 人脸搜索模态框 */}
+      {mounted && (
+        <FaceSearchModal 
+          albumSlug={album.slug}
+          isOpen={showFaceSearch}
+          onClose={() => setShowFaceSearch(false)}
+          onSearch={handleFaceSearch}
+        />
       )}
     </>
   )

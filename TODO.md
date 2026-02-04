@@ -74,27 +74,31 @@
 
 ---
 
-## 🗓️ 第四阶段：AI 智能 - 人脸识别（优先级：低/未来）
+## 🗓️ 第四阶段：AI 智能 - 人脸识别（优先级：低/未来） (已完成 ✅)
 **目标**：允许访客通过上传自拍找到自己的照片。
 
 ### 4.1 向量数据库
-- [ ] **基础设施**: 在 PostgreSQL 中启用 `pgvector` 扩展。
-- [ ] **Schema**: 创建 `face_embeddings` 表 (photo_id, embedding_vector, face_location)。
+- [x] **基础设施**: 在 PostgreSQL 中启用 `pgvector` 扩展 (Docker Image: pgvector/pgvector:pg16)。
+- [x] **Schema**: 创建 `face_embeddings` 表 (photo_id, embedding_vector, face_location) 及 RPC 搜索函数。
 
 ### 4.2 人脸服务 (新建 `services/ai`)
-- [ ] **搭建**: 使用 FastAPI + InsightFace 创建 Python 服务。
-- [ ] **API**:
+- [x] **搭建**: 使用 FastAPI + InsightFace 创建 Python 服务 (Docker Service: ai)。
+- [x] **API**:
   - `POST /extract`: 从图片提取人脸 -> 返回向量。
-  - `POST /search`: 在数据库中搜索向量。
+  - (优化) 搜索直接使用 PostgreSQL RPC `search_faces`，无需 Python 服务介入搜索过程。
 
 ### 4.3 Worker 集成
-- [ ] **流程**: 照片处理完成后，发送缩略图给 人脸服务。
-- [ ] **存储**: 将返回的向量保存到数据库。
+- [x] **流程**: 照片处理完成后，发送缩略图给 人脸服务。
+- [x] **存储**: 将返回的向量保存到数据库。
 
 ### 4.4 用户界面 (`apps/web`)
-- [ ] **C 端**: 在相册页添加“找我”按钮。
-- [ ] **交互**: 上传自拍 -> 裁剪人脸 -> 搜索 API -> 显示匹配结果。
+- [x] **C 端**: 在相册页添加“找自己”按钮 (`FloatingActions`)。
+- [x] **交互**: 上传自拍 -> 调用搜索 API -> 存入 SessionStorage -> 过滤相册显示。
 
 ---
 
 ## 🛠 系统优化（已完成/进行中）
+- [x] **性能优化**: 修复 N+1 查询问题 (Admin 页面, API 路由)。
+- [x] **性能优化**: 优化批量更新逻辑 (使用 `WHERE IN`)。
+- [x] **并发优化**: 提升照片上传并发数至 5。
+- [x] **代码质量**: 全面扫描并修复潜在的数据库循环查询问题。

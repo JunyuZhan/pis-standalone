@@ -8,6 +8,7 @@
 -- 创建必要的扩展
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";  -- 用于全文搜索
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- ============================================
 -- 用户表（自定义认证模式使用）
@@ -116,6 +117,44 @@ CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos(deleted_at) WHERE del
 CREATE INDEX IF NOT EXISTS idx_photos_album_status ON photos(album_id, status) WHERE deleted_at IS NULL;
 -- Index for manual sorting (needed for ORDER BY sort_order queries)
 CREATE INDEX IF NOT EXISTS idx_photos_album_sort_order ON photos(album_id, sort_order) WHERE deleted_at IS NULL;
+
+-- ============================================
+-- 人脸特征表
+-- ============================================
+CREATE TABLE IF NOT EXISTS face_embeddings (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    photo_id UUID NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    album_id UUID NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    embedding vector(512), -- InsightFace usually generates 512d vectors
+    face_location JSONB,   -- {x, y, w, h}
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 向量搜索函数
+CREATE OR REPLACE FUNCTION search_faces(
+  query_embedding vector(512),
+  match_threshold float,
+  match_count int,
+  filter_album_id uuid
+)
+RETURNS TABLE (
+  photo_id uuid,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    face_embeddings.photo_id,
+    1 - (face_embeddings.embedding <=> query_embedding) as similarity
+  FROM face_embeddings
+  WHERE 1 - (face_embeddings.embedding <=> query_embedding) > match_threshold
+  AND album_id = filter_album_id
+  ORDER BY face_embeddings.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
 
 -- ============================================
 -- 打包下载表

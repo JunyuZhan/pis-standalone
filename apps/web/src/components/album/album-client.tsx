@@ -2,9 +2,9 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { MasonryGrid } from './masonry'
-import { Loader2, ImageIcon, RefreshCw, X } from 'lucide-react'
+import { Loader2, ImageIcon, RefreshCw, X, ScanFace } from 'lucide-react'
 import { usePhotoRealtime } from '@/hooks/use-photo-realtime'
 import { useLocale } from '@/lib/i18n'
 import type { Album, Photo } from '@/types/database'
@@ -46,9 +46,11 @@ const messages = {
  * 排序由页面 header 的 SortToggle 通过 URL 参数控制
  */
 export function AlbumClient({ album, initialPhotos, layout = 'masonry' }: AlbumClientProps) {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const sort = searchParams.get('sort') || album.sort_rule || 'capture_desc'
   const groupId = searchParams.get('group')
+  const searchMode = searchParams.get('search')
   const queryClient = useQueryClient()
   const locale = useLocale()
   const t = messages[locale as keyof typeof messages] || messages['zh-CN']
@@ -75,7 +77,7 @@ export function AlbumClient({ album, initialPhotos, layout = 'masonry' }: AlbumC
     isLoading,
     refetch,
   } = useInfiniteQuery({
-    queryKey: ['album-photos', album.slug, sort, groupId],
+    queryKey: ['album-photos', album.slug, sort, groupId, searchMode],
     queryFn: async ({ pageParam = 1 }) => {
       const origin = typeof window !== 'undefined' ? window.location.origin : ''
       const url = new URL(`/api/public/albums/${album.slug}/photos`, origin)
@@ -84,6 +86,22 @@ export function AlbumClient({ album, initialPhotos, layout = 'masonry' }: AlbumC
       url.searchParams.set('sort', sort)
       if (groupId) {
         url.searchParams.set('group', groupId)
+      }
+      
+      // 处理搜索模式
+      if (searchMode === 'face') {
+        const key = `face_search_${album.id}`
+        try {
+          const idsStr = sessionStorage.getItem(key)
+          if (idsStr) {
+            const ids = JSON.parse(idsStr)
+            if (Array.isArray(ids) && ids.length > 0) {
+              url.searchParams.set('ids', ids.join(','))
+            }
+          }
+        } catch (e) {
+          console.error('Failed to read search results', e)
+        }
       }
       
       const res = await fetch(url.toString())
@@ -181,6 +199,31 @@ export function AlbumClient({ album, initialPhotos, layout = 'masonry' }: AlbumC
 
   return (
     <>
+      {/* 搜索结果提示栏 */}
+      {searchMode === 'face' && (
+        <div className="container mx-auto px-4 py-3 mb-4">
+          <div className="flex items-center justify-between bg-accent/10 border border-accent/20 rounded-lg p-3">
+            <div className="flex items-center gap-2 text-accent">
+              <ScanFace className="w-5 h-5" />
+              <span className="font-medium">人脸搜索结果</span>
+              <span className="text-sm opacity-70">
+                (找到 {data?.pages[0]?.pagination.total || 0} 张照片)
+              </span>
+            </div>
+            <button 
+              onClick={() => {
+                const params = new URLSearchParams(searchParams.toString())
+                params.delete('search')
+                router.push(`?${params.toString()}`)
+              }}
+              className="p-1 hover:bg-accent/20 rounded-full text-accent transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 新照片更新通知 - 固定在顶部 */}
       {showNotification && newPhotoCount > 0 && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300">
@@ -233,8 +276,26 @@ export function AlbumClient({ album, initialPhotos, layout = 'masonry' }: AlbumC
       ) : (
         <div className="text-center py-20">
           <ImageIcon className="w-16 h-16 text-text-muted mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2 text-text-primary">暂无照片</h3>
-          <p className="text-text-secondary">摄影师正在上传照片，请稍后再来查看</p>
+          <h3 className="text-lg font-semibold mb-2 text-text-primary">
+            {searchMode === 'face' ? '未找到匹配的照片' : '暂无照片'}
+          </h3>
+          <p className="text-text-secondary">
+            {searchMode === 'face' 
+              ? '尝试换一张自拍，或者浏览全部照片' 
+              : '摄影师正在上传照片，请稍后再来查看'}
+          </p>
+          {searchMode === 'face' && (
+            <button 
+              onClick={() => {
+                const params = new URLSearchParams(searchParams.toString())
+                params.delete('search')
+                router.push(`?${params.toString()}`)
+              }}
+              className="mt-4 text-accent hover:underline font-medium"
+            >
+              浏览全部照片
+            </button>
+          )}
         </div>
       )}
     </>

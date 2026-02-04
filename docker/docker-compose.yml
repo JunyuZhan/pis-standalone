@@ -37,11 +37,13 @@ volumes:
     name: pis_worker_logs
   pis_web_logs:
     name: pis_web_logs
+  pis_ai_models:
+    name: pis_ai_models
 
 services:
   # ==================== 数据库 ====================
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: pis-postgres
     env_file:
       - ../.env
@@ -285,6 +287,20 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  # ==================== AI 服务 ====================
+  ai:
+    build:
+      context: ../services/ai
+      dockerfile: Dockerfile
+    container_name: pis-ai
+    ports:
+      - "8000:8000"
+    volumes:
+      - pis_ai_models:/root/.insightface/models
+    networks:
+      - pis-network
+    restart: unless-stopped
 
   # ==================== Nginx ====================
   nginx:
