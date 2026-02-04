@@ -151,45 +151,45 @@ export function MultiWatermarkManager({ watermarks, onChange }: MultiWatermarkMa
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* 水印类型 */}
-                <div>
+              <div className="flex items-end gap-3">
+                {/* 类型 */}
+                <div className="w-24 shrink-0">
                   <label className="block text-xs font-medium text-text-secondary mb-1">
                     类型
                   </label>
-                  <div className="flex gap-2">
-                    <label className="flex items-center gap-1 cursor-pointer text-sm">
-                      <input
-                        type="radio"
-                        name={`watermark-type-${watermark.id}`}
-                        checked={watermark.type === 'text'}
-                        onChange={() => updateWatermark(watermark.id, { type: 'text' })}
-                        className="w-4 h-4 text-accent border-border focus:ring-accent"
-                      />
-                      <span>文字</span>
-                    </label>
-                    <label className="flex items-center gap-1 cursor-pointer text-sm">
-                      <input
-                        type="radio"
-                        name={`watermark-type-${watermark.id}`}
-                        checked={watermark.type === 'logo'}
-                        onChange={() => updateWatermark(watermark.id, { type: 'logo' })}
-                        className="w-4 h-4 text-accent border-border focus:ring-accent"
-                      />
-                      <span>Logo</span>
-                    </label>
-                  </div>
+                  <select
+                    value={watermark.type}
+                    onChange={(e) => updateWatermark(watermark.id, { type: e.target.value as 'text' | 'logo' })}
+                    className="input text-sm w-full h-9 px-2"
+                  >
+                    <option value="text">文字</option>
+                    <option value="logo">Logo</option>
+                  </select>
+                </div>
+
+                {/* 内容 (自适应宽度) */}
+                <div className="flex-1 min-w-0">
+                  <label className="block text-xs font-medium text-text-secondary mb-1">
+                    {watermark.type === 'text' ? '内容' : 'Logo URL'}
+                  </label>
+                  <input
+                    type={watermark.type === 'text' ? 'text' : 'url'}
+                    value={watermark.type === 'text' ? watermark.text || '' : watermark.logoUrl || ''}
+                    onChange={(e) => updateWatermark(watermark.id, watermark.type === 'text' ? { text: e.target.value } : { logoUrl: e.target.value })}
+                    className="input text-sm w-full h-9 px-2"
+                    placeholder={watermark.type === 'text' ? "© Name" : "https://..."}
+                  />
                 </div>
 
                 {/* 位置 */}
-                <div>
+                <div className="w-28 shrink-0">
                   <label className="block text-xs font-medium text-text-secondary mb-1">
                     位置
                   </label>
                   <select
                     value={watermark.position}
                     onChange={(e) => updateWatermark(watermark.id, { position: e.target.value })}
-                    className="input text-sm"
+                    className="input text-sm w-full h-9 px-2"
                   >
                     {POSITION_OPTIONS.map(opt => (
                       <option key={opt.value} value={opt.value}>
@@ -198,72 +198,42 @@ export function MultiWatermarkManager({ watermarks, onChange }: MultiWatermarkMa
                     ))}
                   </select>
                 </div>
+              </div>
 
-                {/* 文字内容或Logo URL */}
-                {watermark.type === 'text' ? (
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-text-secondary mb-1">
-                      文字内容
-                    </label>
-                    <input
-                      type="text"
-                      value={watermark.text || ''}
-                      onChange={(e) => updateWatermark(watermark.id, { text: e.target.value })}
-                      className="input text-sm"
-                      placeholder="© Your Name"
-                    />
-                  </div>
-                ) : (
-                  <div className="md:col-span-2">
-                    <label className="block text-xs font-medium text-text-secondary mb-1">
-                      Logo URL
-                    </label>
-                    <input
-                      type="url"
-                      value={watermark.logoUrl || ''}
-                      onChange={(e) => updateWatermark(watermark.id, { logoUrl: e.target.value })}
-                      className="input text-sm"
-                      placeholder="https://example.com/logo.png"
-                    />
-                  </div>
-                )}
-
-                {/* 边距和透明度 */}
-                <div className="md:col-span-2 space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-text-secondary mb-1">
-                      边距 ({watermark.margin ?? 5}%)
-                    </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="20"
-                      step="1"
-                      value={watermark.margin ?? 5}
-                      onChange={(e) =>
-                        updateWatermark(watermark.id, { margin: parseInt(e.target.value) })
-                      }
-                      className="w-full"
-                    />
-                    <p className="text-xs text-text-muted mt-1">调整水印与边缘的距离（0-20%）</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-text-secondary mb-1">
-                      透明度 ({Math.round((watermark.opacity || 0.5) * 100)}%)
-                    </label>
-                    <input
-                      type="range"
-                      min="0.1"
-                      max="1"
-                      step="0.1"
-                      value={watermark.opacity || 0.5}
-                      onChange={(e) =>
-                        updateWatermark(watermark.id, { opacity: parseFloat(e.target.value) })
-                      }
-                      className="w-full"
-                    />
-                  </div>
+              {/* 第二行：滑块控制 */}
+              <div className="flex items-center gap-4 pt-1">
+                <div className="flex-1 flex items-center gap-2">
+                  <span className="text-xs text-text-secondary whitespace-nowrap w-12">
+                    边距 {watermark.margin ?? 5}%
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="20"
+                    step="1"
+                    value={watermark.margin ?? 5}
+                    onChange={(e) =>
+                      updateWatermark(watermark.id, { margin: parseInt(e.target.value) })
+                    }
+                    className="w-full h-1.5 accent-accent"
+                  />
+                </div>
+                
+                <div className="flex-1 flex items-center gap-2">
+                  <span className="text-xs text-text-secondary whitespace-nowrap w-12">
+                    透明 {Math.round((watermark.opacity || 0.5) * 100)}%
+                  </span>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.1"
+                    value={watermark.opacity || 0.5}
+                    onChange={(e) =>
+                      updateWatermark(watermark.id, { opacity: parseFloat(e.target.value) })
+                    }
+                    className="w-full h-1.5 accent-accent"
+                  />
                 </div>
               </div>
             </div>

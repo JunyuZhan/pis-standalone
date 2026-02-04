@@ -121,7 +121,7 @@ export default async function AlbumDetailPage({ params }: AlbumDetailPageProps) 
       {/* 页面标题 - 移动端优化 */}
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6 sm:mb-8">
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-serif font-bold truncate">{album.title}</h1>
+          <h1 className="text-xl sm:text-2xl font-serif font-bold break-words line-clamp-2 sm:line-clamp-none" title={album.title}>{album.title}</h1>
           <p className="text-text-secondary mt-1 text-sm sm:text-base">
             {album.photo_count} 张照片 · {album.is_public ? '公开' : '私有'}
           </p>

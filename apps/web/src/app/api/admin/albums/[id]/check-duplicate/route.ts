@@ -73,10 +73,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (fileHash) {
       // Use hash-based detection (most accurate)
-      // Note: This query will fail if the hash field doesn't exist in the database
-      // For now, use filename + size detection
-      // TODO: Enable this detection after adding hash field to database
-      /*
       const hashMatchResult = await adminClient
         .from('photos')
         .select('id, filename')
@@ -89,7 +85,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       if (hashMatchResult.data) {
         duplicatePhoto = hashMatchResult.data
       }
-      */
     }
 
     // If not found by hash, use filename + file size detection

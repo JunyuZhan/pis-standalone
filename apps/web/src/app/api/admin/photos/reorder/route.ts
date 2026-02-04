@@ -104,16 +104,17 @@ export async function PATCH(request: NextRequest) {
     }
 
     // 执行批量更新
-    const updatePromises = orders.map((item) =>
-      db.update('photos', { sort_order: item.sortOrder }, { id: item.photoId, album_id: albumId })
-    )
+    // 构造批量更新数据
+    const updateData = orders.map((item) => ({
+      id: item.photoId,
+      sort_order: item.sortOrder,
+    }))
 
-    const results = await Promise.all(updatePromises)
+    // 使用 updateBatch 进行单次查询更新
+    const { error: updateError } = await db.updateBatch('photos', updateData, 'id')
 
-    // 检查是否有失败
-    const errors = results.filter((r) => r.error)
-    if (errors.length > 0) {
-      return handleError(errors[0].error, '部分更新失败')
+    if (updateError) {
+      return handleError(updateError, '批量更新失败')
     }
 
     // 更新相册的 sort_rule 为 manual

@@ -118,21 +118,22 @@ export async function PATCH(request: NextRequest) {
     if (updates.show_exif !== undefined) updateData.show_exif = updates.show_exif
 
     // 执行批量更新
-    // 批量更新：为每个相册ID执行更新操作
-    const updatePromises = albumIds.map((id) => 
-      db.update('albums', updateData, { id, deleted_at: null })
+    // 优化：使用单次更新操作（使用 WHERE IN）
+    // 通过将 ID 数组传递给 filters，利用 PostgreSQL 的 = ANY($1) 语法
+    const updateResult = await db.update(
+      'albums', 
+      updateData, 
+      { 'id[]': albumIds, deleted_at: null }
     )
-    const updateResults = await Promise.all(updatePromises)
-    const updateError = updateResults.find((r) => r.error)?.error
 
-    if (updateError) {
-      return handleError(updateError, '批量更新相册失败')
+    if (updateResult.error) {
+      return handleError(updateResult.error, '批量更新相册失败')
     }
 
     return createSuccessResponse({
       success: true,
-      updatedCount: albumIds.length,
-      message: `已更新 ${albumIds.length} 个相册`,
+      updatedCount: updateResult.data?.length || 0,
+      message: `已更新 ${updateResult.data?.length || 0} 个相册`,
     })
   } catch (error) {
     return handleError(error, '批量更新相册失败')

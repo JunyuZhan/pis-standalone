@@ -61,13 +61,11 @@ export async function POST(request: NextRequest) {
     const validPhotoIds = deletedPhotos.map(p => p.id)
 
     // 恢复照片：清除 deleted_at
-    // 批量更新：为每个照片ID执行更新操作
-    const restorePromises = validPhotoIds.map((id) => adminClient.update('photos', { deleted_at: null }, { id }))
-    const restoreResults = await Promise.all(restorePromises)
-    const restoreError = restoreResults.find((r) => r.error)?.error
+    // 批量更新：一次性恢复所有照片
+    const restoreResult = await adminClient.update('photos', { deleted_at: null }, { 'id[]': validPhotoIds })
 
-    if (restoreError) {
-      return ApiError.internal(`数据库更新失败: ${restoreError.message}`)
+    if (restoreResult.error) {
+      return ApiError.internal(`数据库更新失败: ${restoreResult.error.message}`)
     }
 
     // 更新相册照片计数（重新统计 completed 状态且未删除的照片）
@@ -95,17 +93,18 @@ export async function POST(request: NextRequest) {
       })
     }
     
-    for (const albumId of albumIds) {
+    // 使用 Promise.all 并行处理多个相册的计数更新
+    await Promise.all(albumIds.map(async (albumId) => {
       const countResult = await adminClient
         .from('photos')
-        .select('*')
+        .select('id', { count: 'exact', head: true }) // 优化：只获取数量，不获取数据
         .eq('album_id', albumId)
         .eq('status', 'completed')
         .is('deleted_at', null)
 
-      const actualPhotoCount = countResult.count || countResult.data?.length || 0
+      const actualPhotoCount = countResult.count || 0
       await adminClient.update('albums', { photo_count: actualPhotoCount }, { id: albumId })
-    }
+    }))
 
     // 清除 Next.js/Vercel 路由缓存，确保前端立即看到更新
     for (const [, slug] of albumSlugs.entries()) {

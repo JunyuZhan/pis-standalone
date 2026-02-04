@@ -19,6 +19,7 @@ interface PhotoRow {
   blur_data: string | null
   captured_at: string | null
   is_selected: boolean
+  updated_at: string | null
 }
 
 /**
@@ -176,7 +177,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           is_selected: photo.is_selected,
           album_id: album.id,
           created_at: '',
-          updated_at: '',
+          updated_at: photo.updated_at,
           status: 'completed',
           sort_order: 0,
           file_size: 0,

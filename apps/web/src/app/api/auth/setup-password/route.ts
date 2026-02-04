@@ -136,6 +136,28 @@ export async function POST(request: NextRequest) {
       const user = await authDb.findUserByEmail(normalizedEmail)
       
       if (!user) {
+        // 如果用户不存在，检查是否系统处于未初始化状态（没有任何管理员）
+        let isSystemUninitialized = false
+        if (authDb.hasAnyAdmin) {
+          const hasAdmin = await authDb.hasAnyAdmin()
+          isSystemUninitialized = !hasAdmin
+        }
+
+        // 如果系统未初始化，允许自动创建管理员
+        if (isSystemUninitialized) {
+          console.log('System uninitialized, creating first admin user:', normalizedEmail)
+          const passwordHash = await hashPassword(password)
+          await authDb.createUser(normalizedEmail, passwordHash)
+          
+          return createSuccessResponse(
+            {
+              success: true,
+              message: '管理员账户创建并设置成功',
+            },
+            200
+          )
+        }
+
         return NextResponse.json(
           {
             error: {

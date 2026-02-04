@@ -163,6 +163,25 @@ export class PostgreSQLAuthDatabase implements ExtendedAuthDatabase {
       console.error('Failed to update last login time:', error)
     }
   }
+
+  /**
+   * 检查是否存在任何管理员账户
+   */
+  async hasAnyAdmin(): Promise<boolean> {
+    const db = await createAdminClient()
+    const { count, error } = await db
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'admin')
+      .eq('is_active', true)
+
+    if (error) {
+      console.error('Failed to check admin existence:', error)
+      return false
+    }
+
+    return (count || 0) > 0
+  }
 }
 
 /**

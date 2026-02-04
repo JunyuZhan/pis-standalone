@@ -29,8 +29,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const baseClasses = 'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-accent/50 focus:ring-offset-2'
-    
+    const baseClasses =
+      'inline-flex items-center justify-center rounded-lg font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 active:scale-95 touch-manipulation'
+
     const variantClasses = {
       primary: 'bg-accent text-background hover:bg-accent/90 active:scale-[0.98]',
       secondary: 'bg-surface-elevated text-text-primary border border-border hover:bg-surface hover:border-border-light active:scale-[0.98]',

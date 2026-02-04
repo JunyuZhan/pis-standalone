@@ -12,7 +12,7 @@ import { cn, formatFileSize } from '@/lib/utils'
 // 因此文件 >= 5MB 时使用分片上传，确保第一个分片至少 5MB
 const MULTIPART_THRESHOLD = 5 * 1024 * 1024 // >= 5MB 使用分片上传
 const CHUNK_SIZE = 5 * 1024 * 1024 // 5MB 分片大小（符合 S3/MinIO 最小分片要求）
-const MAX_CONCURRENT_UPLOADS = 3 // 最大同时上传数量
+const MAX_CONCURRENT_UPLOADS = 5 // 最大同时上传数量
 const MAX_RETRIES = 3 // 最大重试次数
 
 // 根据文件大小计算超时时间（毫秒）
@@ -97,6 +97,7 @@ interface UploadFile {
   photoId?: string
   uploadUrl?: string
   respAlbumId?: string
+  hash?: string
 }
 
 export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
@@ -248,7 +249,7 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
 
     // 检查重复文件
     const duplicateFiles: string[] = []
-    const nonDuplicateFiles: File[] = []
+    const nonDuplicateFiles: { file: File; hash?: string }[] = []
 
     // 批量检查重复（先快速检查文件名+大小）
     const duplicateChecks = await Promise.all(
@@ -272,7 +273,7 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
                 file.size,
                 fileHash
               )
-              return { file, isDuplicate: hashCheck.isDuplicate }
+              return { file, isDuplicate: hashCheck.isDuplicate, hash: fileHash }
             } catch (hashError) {
               // 哈希计算失败，使用快速检查的结果
               console.warn('[Upload] Failed to calculate hash for', file.name, hashError)
@@ -290,11 +291,15 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
     )
 
     // 分离重复和非重复文件
-    duplicateChecks.forEach(({ file, isDuplicate }) => {
+    duplicateChecks.forEach((result) => {
+      // result 类型推断为 { file: File, isDuplicate: boolean, hash?: string }
+      // 需要手动指定类型或依赖推断，这里依赖推断即可
+      const { file, isDuplicate, hash } = result as { file: File, isDuplicate: boolean, hash?: string }
+      
       if (isDuplicate) {
         duplicateFiles.push(file.name)
       } else {
-        nonDuplicateFiles.push(file)
+        nonDuplicateFiles.push({ file, hash })
       }
     })
 
@@ -318,19 +323,20 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
     }))
     
     const uploadFiles: UploadFile[] = nonDuplicateFiles
-      .filter((file) => {
+      .filter((item) => {
         // 如果文件已在队列中，跳过
-        const fileKey = `${file.name}-${file.size}`
+        const fileKey = `${item.file.name}-${item.file.size}`
         if (existingFileIds.has(fileKey)) {
-          console.warn('[Upload] File already in queue, skipping:', file.name)
+          console.warn('[Upload] File already in queue, skipping:', item.file.name)
           return false
         }
         existingFileIds.add(fileKey)
         return true
       })
-      .map((file) => ({
+      .map((item) => ({
         id: Math.random().toString(36).substr(2, 9),
-        file,
+        file: item.file,
+        hash: item.hash,
         status: 'pending' as const,
         progress: 0,
       }))
@@ -1014,6 +1020,7 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
               filename: uploadFile.file.name,
               contentType: uploadFile.file.type,
               fileSize: uploadFile.file.size,
+              hash: uploadFile.hash,
             }),
           })
           
@@ -1227,6 +1234,7 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
           filename: uploadFile.file.name,
           contentType: uploadFile.file.type,
           fileSize: uploadFile.file.size,
+          hash: uploadFile.hash,
         }),
       })
 

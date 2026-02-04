@@ -104,20 +104,28 @@ export async function POST(request: NextRequest) {
       if (photo.preview_key) filesToDelete.push(photo.preview_key)
     }
 
-    // 批量删除文件（并行执行，但不阻塞）
-    Promise.all(
-      filesToDelete.map((key) =>
+    // 批量删除文件（调用 Worker 批量接口）
+    if (filesToDelete.length > 0) {
+      // 分批处理，防止请求体过大
+      const BATCH_SIZE = 50;
+      const batches = [];
+      for (let i = 0; i < filesToDelete.length; i += BATCH_SIZE) {
+        batches.push(filesToDelete.slice(i, i + BATCH_SIZE));
+      }
+
+      // 异步执行，不等待结果
+      Promise.all(batches.map(batch => 
         fetch(proxyUrl, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ key }),
+          body: JSON.stringify({ keys: batch }),
         }).catch((error) => {
-          console.warn(`[Permanent Delete] Failed to delete file ${key}:`, error)
+          console.warn(`[Permanent Delete] Failed to delete file batch (${batch.length} files):`, error)
         })
-      )
-    ).catch((error) => {
-      console.warn('[Permanent Delete] Error deleting files:', error)
-    })
+      )).catch(error => {
+        console.warn('[Permanent Delete] Error dispatching delete requests:', error)
+      })
+    }
 
     // 2. 清除 Cloudflare CDN 缓存（如果配置了）
     // 注意：即使清除失败也不阻止删除操作，但会等待清除完成以确保执行
@@ -161,35 +169,36 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. 删除数据库记录
-    // 批量删除：为每个照片ID执行删除操作
-    const deletePromises = validPhotoIds.map((id) => adminClient.delete('photos', { id }))
-    const deleteResults = await Promise.all(deletePromises)
-    const deleteError = deleteResults.find((r) => r.error)?.error
+    // 批量删除：一次性删除所有照片记录
+    const deleteResult = await adminClient.delete('photos', { 'id[]': validPhotoIds })
 
-    if (deleteError) {
-      return handleError(deleteError, '删除照片记录失败')
+    if (deleteResult.error) {
+      return handleError(deleteResult.error, '删除照片记录失败')
     }
 
     // 4. 更新相册封面（如果封面照片被删除）
-    for (const album of albumsMap.values()) {
-      if (album.cover_photo_id && validPhotoIds.includes(album.cover_photo_id)) {
-        await adminClient.update('albums', { cover_photo_id: null }, { id: album.id })
-      }
+    const albumsToUpdateCover = Array.from(albumsMap.values())
+      .filter(album => album.cover_photo_id && validPhotoIds.includes(album.cover_photo_id))
+      .map(album => album.id)
+
+    if (albumsToUpdateCover.length > 0) {
+      await adminClient.update('albums', { cover_photo_id: null }, { 'id[]': albumsToUpdateCover })
     }
 
     // 5. 更新相册照片计数
-    for (const albumId of albumIds) {
+    // 使用 Promise.all 并行处理多个相册的计数更新
+    await Promise.all(albumIds.map(async (albumId) => {
       const countResult = await adminClient
         .from('photos')
-        .select('*')
+        .select('id', { count: 'exact', head: true }) // 优化：只获取数量，不获取数据
         .eq('album_id', albumId)
         .eq('status', 'completed')
         .is('deleted_at', null)
 
-      const actualPhotoCount = countResult.count || countResult.data?.length || 0
+      const actualPhotoCount = countResult.count || 0
 
       await adminClient.update('albums', { photo_count: actualPhotoCount }, { id: albumId })
-    }
+    }))
 
     // 6. 清除 Next.js/Vercel 路由缓存
     for (const album of albumsMap.values()) {

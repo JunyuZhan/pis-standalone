@@ -81,6 +81,8 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      # MinIO Console 访问路径
+      - MINIO_BROWSER_REDIRECT_URL=${NEXT_PUBLIC_APP_URL:-http://${DOMAIN:-localhost}:8088}/minio-console
     volumes:
       - pis_minio_data:/data
     command: server /data --console-address ":9001"

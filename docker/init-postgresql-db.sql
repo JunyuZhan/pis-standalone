@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS photos (
     file_size BIGINT,
     mime_type VARCHAR(100),
     blur_data TEXT,                       -- BlurHash
+    hash VARCHAR(64),                     -- SHA-256 文件哈希
     exif JSONB DEFAULT '{}',
     rotation INTEGER DEFAULT 0,           -- 旋转角度
     sort_order INTEGER DEFAULT 0,         -- 手动排序顺序
@@ -103,10 +104,13 @@ CREATE TABLE IF NOT EXISTS photos (
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_photos_album_id ON photos(album_id);
 CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
+CREATE INDEX IF NOT EXISTS idx_photos_hash ON photos(hash);
 CREATE INDEX IF NOT EXISTS idx_photos_created_at ON photos(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_photos_captured_at ON photos(captured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_photos_deleted_at ON photos(deleted_at) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_photos_album_status ON photos(album_id, status) WHERE deleted_at IS NULL;
+-- Index for manual sorting (needed for ORDER BY sort_order queries)
+CREATE INDEX IF NOT EXISTS idx_photos_album_sort_order ON photos(album_id, sort_order) WHERE deleted_at IS NULL;
 
 -- ============================================
 -- 打包下载表

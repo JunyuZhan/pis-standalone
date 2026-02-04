@@ -63,7 +63,7 @@ export function AlbumStickyNav({
                     <ArrowLeft className="w-5 h-5 text-text-primary" />
                   </Link>
                 )}
-                <h2 className="font-serif font-bold text-lg truncate">
+                <h2 className="font-serif font-bold text-lg truncate max-w-[50vw] sm:max-w-none" title={album.title}>
                   {album.title}
                 </h2>
                 <div className="hidden sm:flex items-center gap-2">

@@ -256,18 +256,14 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     const { photo_ids } = bodyValidation.data
 
     // 删除分组关联
-    // 批量删除：为每个照片ID执行删除操作
-    interface DeleteResult {
-      error?: Error | null
-    }
-    const deletePromises = photo_ids.map((photoId: string) => 
-      dbAdmin.delete('photo_group_assignments', { group_id: groupId, photo_id: photoId })
-    )
-    const deleteResults = await Promise.all(deletePromises)
-    const deleteError = deleteResults.find((r: DeleteResult) => r.error)?.error
+    // 批量删除：一次性删除所有关联记录
+    const deleteResult = await dbAdmin.delete('photo_group_assignments', { 
+      group_id: groupId, 
+      'photo_id[]': photo_ids 
+    })
 
-    if (deleteError) {
-      return ApiError.internal(`数据库错误: ${deleteError.message}`)
+    if (deleteResult.error) {
+      return ApiError.internal(`数据库错误: ${deleteResult.error.message}`)
     }
 
     return NextResponse.json({

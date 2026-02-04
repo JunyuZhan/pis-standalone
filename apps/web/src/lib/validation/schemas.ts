@@ -202,6 +202,7 @@ export const uploadPhotoSchema = z.object({
   filename: z.string().min(1, '文件名不能为空').max(255, '文件名过长'),
   contentType: z.string().min(1, 'Content-Type不能为空'),
   fileSize: z.number().int().positive().optional(),
+  hash: z.string().optional(),
 }).refine((data) => {
   // 验证文件类型
   const allowedTypes = ['image/jpeg', 'image/png', 'image/heic', 'image/webp', 'image/gif', 'image/tiff'];

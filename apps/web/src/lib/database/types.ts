@@ -80,6 +80,8 @@ export interface QueryBuilder<T = unknown> {
 export interface DatabaseClientInterface {
   from<T = unknown>(table: string): QueryBuilder<T>
   insert<T = unknown>(table: string, data: T | T[]): Promise<{ data: T[] | null; error: Error | null }>
+  upsert<T = unknown>(table: string, data: T | T[], onConflict?: string): Promise<{ data: T[] | null; error: Error | null }>
+  updateBatch<T = unknown>(table: string, data: T[], keyColumn?: string): Promise<{ data: T[] | null; error: Error | null }>
   update<T = unknown>(table: string, data: Partial<T>, filters: DatabaseFilters): Promise<{ data: T[] | null; error: Error | null }>
   delete(table: string, filters: DatabaseFilters): Promise<{ data: unknown[] | null; error: Error | null }>
   rpc(functionName: string, params?: RpcParams): Promise<{ data: unknown; error: Error | null }>

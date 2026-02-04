@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import dynamic from 'next/dynamic'
 import { motion } from 'framer-motion'
 import { Heart, Download, Share2, Expand, Loader2, ImageIcon } from 'lucide-react'
@@ -267,10 +267,7 @@ export function MasonryGrid({
             onClick={() => handlePhotoClick(index)}
             showSelect={true}
             isSelected={selectedMap[photo.id] || false}
-            onSelect={(e) => {
-              e.stopPropagation()
-              handleCardSelect(photo.id, selectedMap[photo.id] || false)
-            }}
+            onToggleSelect={handleCardSelect}
             allowDownload={album.allow_download}
             layout={layout}
           />
@@ -312,19 +309,19 @@ interface PhotoCardProps {
   cardRef?: React.Ref<HTMLDivElement>
   showSelect?: boolean
   isSelected?: boolean
-  onSelect?: (e: React.MouseEvent) => void
+  onToggleSelect?: (photoId: string, currentSelected: boolean) => void
   allowDownload?: boolean
   layout?: LayoutMode
 }
 
-function PhotoCard({
+const PhotoCard = memo(function PhotoCard({
   photo,
   index,
   onClick,
   cardRef,
   showSelect,
   isSelected,
-  onSelect,
+  onToggleSelect,
   allowDownload = false,
   layout = 'masonry',
 }: PhotoCardProps) {
@@ -542,7 +539,7 @@ function PhotoCard({
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  onSelect?.(e)
+                  onToggleSelect?.(photo.id, isSelected || false)
                 }}
                 className={cn(
                   'flex items-center rounded-full font-medium transition-all duration-200 backdrop-blur-md',
@@ -612,4 +609,4 @@ function PhotoCard({
       </div>
     </motion.div>
   )
-}
+})

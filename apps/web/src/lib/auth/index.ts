@@ -297,6 +297,13 @@ export interface AuthDatabase {
    * @param userId - 用户 ID
    */
   updateLastLogin?(userId: string): Promise<void>
+
+  /**
+   * 检查是否存在任何管理员账户
+   * 
+   * @returns {Promise<boolean>} 如果存在至少一个管理员，返回 true
+   */
+  hasAnyAdmin?(): Promise<boolean>
 }
 
 /** 内部数据库实例 */

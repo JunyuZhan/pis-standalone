@@ -1278,35 +1278,50 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/api/cleanup-file' && req.method === 'POST') {
     try {
       const body = await parseJsonBody(req, CONFIG.MAX_BODY_SIZE);
-      const { key } = body;
+      const { key, keys } = body;
       
-      const validation = validateInput(body, ['key']);
-      if (!validation.valid) {
+      const keysToDelete = keys && Array.isArray(keys) ? keys : (key ? [key] : []);
+      
+      if (keysToDelete.length === 0) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: validation.error }));
+        res.end(JSON.stringify({ error: 'Missing key or keys' }));
         return;
       }
       
-      if (typeof key !== 'string' || key.length === 0 || key.length > 500) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Invalid key format' }));
-        return;
+      // 批量删除（并发执行）
+      const results = await Promise.allSettled(keysToDelete.map(async (k: string) => {
+        if (typeof k !== 'string' || k.length === 0 || k.length > 500) {
+           throw new Error(`Invalid key format: ${k}`);
+        }
+        try {
+          await deleteFile(k);
+          return k;
+        } catch (deleteErr: any) {
+          // 文件不存在时也视为成功
+          if (deleteErr?.code === 'NoSuchKey' || deleteErr?.message?.includes('does not exist')) {
+            return k;
+          }
+          throw deleteErr;
+        }
+      }));
+
+      const failed = results.filter(r => r.status === 'rejected');
+      
+      if (failed.length > 0) {
+         console.error(`[Cleanup] Failed to delete ${failed.length} files`);
+         // 即使部分失败，也返回 200，但在 message 中说明？
+         // 或者返回 207 Multi-Status？
+         // 为了简单起见，如果只有部分失败，我们记录日志但返回成功，或者返回失败列表
+         // 但通常 cleanup 是后台任务，尽力而为。
       }
 
-        // 尝试删除文件（如果不存在也不会报错）
-        try {
-          await deleteFile(key);
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, message: 'File deleted' }));
-        } catch (deleteErr: any) {
-          // 文件不存在时也返回成功（幂等操作）
-          if (deleteErr?.code === 'NoSuchKey' || deleteErr?.message?.includes('does not exist')) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, message: 'File not found (already deleted)' }));
-          } else {
-            throw deleteErr;
-          }
-        }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        success: true, 
+        message: `Processed ${keysToDelete.length} files`,
+        failedCount: failed.length
+      }));
+
     } catch (err: any) {
       console.error('[Cleanup] File cleanup error:', err);
       const statusCode = err.message?.includes('too large') ? 413 : 

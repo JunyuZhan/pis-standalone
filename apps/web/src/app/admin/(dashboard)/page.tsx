@@ -46,7 +46,6 @@ export default async function AdminPage() {
   // 统计每个相册的实际 completed 照片数量
   const albumIds = albumsData.map((a) => a.id) || []
   const photoCountMap: Record<string, number> = {}
-  const albumsToUpdate: { id: string; count: number }[] = []
 
   if (albumIds.length > 0) {
     // 使用分组查询统计每个相册的照片数量（排除已删除的照片）
@@ -63,19 +62,6 @@ export default async function AdminPage() {
       photoCounts.forEach((p) => {
         photoCountMap[p.album_id] = (photoCountMap[p.album_id] || 0) + 1
       })
-    }
-
-    // 检查哪些相册的计数不一致
-    albumsData.forEach((album) => {
-      const actualCount = photoCountMap[album.id] || 0
-      if (actualCount !== album.photo_count) {
-        albumsToUpdate.push({ id: album.id, count: actualCount })
-      }
-    })
-
-    // 批量更新不一致的相册计数
-    for (const { id, count } of albumsToUpdate) {
-      await db.update('albums', { photo_count: count }, { id })
     }
   }
 

@@ -96,10 +96,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return ApiError.unauthorized('请先登录')
     }
 
-    // 速率限制：每个用户每分钟最多 20 次上传请求
+    // 速率限制：每个用户每分钟最多 300 次上传请求（支持批量并发上传）
+    // 假设并发为 5，每秒处理 5 张，一分钟可处理 300 张
     const ip = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
     const identifier = `upload:${user.id}:${ip}`
-    const rateLimit = await checkRateLimit(identifier, 20, 60 * 1000) // 20 次/分钟
+    const rateLimit = await checkRateLimit(identifier, 300, 60 * 1000) // 300 次/分钟
 
     if (!rateLimit.allowed) {
       return NextResponse.json(
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
           status: 429,
           headers: {
             ...(response && response.headers ? Array.from(response.headers.entries()).reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {}) : {}),
-            'X-RateLimit-Limit': '20',
+            'X-RateLimit-Limit': '300',
             'X-RateLimit-Remaining': rateLimit.remaining.toString(),
             'X-RateLimit-Reset': new Date(rateLimit.resetAt).toISOString(),
             'Retry-After': Math.ceil((rateLimit.resetAt - Date.now()) / 1000).toString(),
@@ -149,7 +150,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return handleError(validation.error, '输入验证失败')
     }
 
-    const { filename, contentType, fileSize } = validation.data
+    const { filename, contentType, fileSize, hash } = validation.data
 
     // 清理和验证文件名（防止路径遍历、注入攻击）
     // 1. 移除路径分隔符和特殊字符（防止路径遍历）
@@ -246,6 +247,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       filename: sanitizedFilename, // 使用清理后的文件名
       file_size: fileSize,
       mime_type: contentType,
+      hash: hash,
       status: 'pending',
     })
 

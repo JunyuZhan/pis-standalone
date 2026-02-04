@@ -63,7 +63,7 @@ export function AlbumHeader({ album, currentSort, currentLayout }: AlbumHeaderPr
         <div className="flex flex-col gap-3">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <h1 className="text-lg md:text-xl font-serif font-bold truncate">
+              <h1 className="text-lg md:text-xl font-serif font-bold break-words line-clamp-2 md:line-clamp-none" title={album.title}>
                 {album.title}
               </h1>
               
