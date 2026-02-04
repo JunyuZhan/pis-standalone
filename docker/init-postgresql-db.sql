@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS albums (
     watermark_config JSONB DEFAULT '{}',
     color_grading JSONB DEFAULT '{}',
     enable_human_retouch BOOLEAN DEFAULT false, -- 开启人工修图
+    enable_ai_retouch BOOLEAN DEFAULT false,    -- 开启 AI 智能修图
+    ai_retouch_config JSONB DEFAULT '{}',       -- AI 修图配置
     -- 分享配置
     share_title VARCHAR(255),
     share_description TEXT,

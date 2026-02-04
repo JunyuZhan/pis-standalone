@@ -28,6 +28,7 @@ import sharp from 'sharp'
 import { encode } from 'blurhash'
 import exifReader from 'exif-reader'
 import { STYLE_PRESETS, getPresetById, type StylePresetConfig } from './lib/style-presets.js'
+import { aiRetouchService, type AIRetouchOptions } from './lib/ai-retouch.js'
 
 /**
  * 处理结果
@@ -315,6 +316,7 @@ export class PhotoProcessor {
    * @param watermarkConfig - 水印配置
    * @param manualRotation - 手动旋转角度（可选，覆盖 EXIF）
    * @param stylePresetId - 风格预设 ID（可选）
+   * @param aiRetouchConfig - AI 修图配置（可选）
    * @returns 处理结果对象
    *
    * @example
@@ -322,14 +324,16 @@ export class PhotoProcessor {
    * const result = await processor.process(
    *   { enabled: true, text: '© My Gallery', opacity: 0.5, position: 'bottom-right' },
    *   null,
-   *   'japanese-fresh'
+   *   'japanese-fresh',
+   *   { enabled: true, config: { preset: 'portrait' } }
    * )
    * ```
    */
   async process(
     watermarkConfig?: WatermarkConfig,
     manualRotation?: number | null,
-    stylePresetId?: string | null
+    stylePresetId?: string | null,
+    aiRetouchConfig?: { enabled: boolean; config?: AIRetouchOptions }
   ): Promise<ProcessedResult> {
     // Get original metadata first (for EXIF extraction)
     const originalMetadata = await this.image.metadata();
@@ -354,6 +358,17 @@ export class PhotoProcessor {
     } else {
       // Automatic rotation: only based on EXIF orientation
       rotatedImage = this.image.clone().rotate();
+    }
+
+    // AI Retouch (before style preset)
+    if (aiRetouchConfig?.enabled) {
+      try {
+        const buffer = await rotatedImage.toBuffer();
+        const retouchedBuffer = await aiRetouchService.process(buffer, aiRetouchConfig.config);
+        rotatedImage = sharp(retouchedBuffer);
+      } catch (err) {
+        console.warn('AI Retouch failed, falling back to original:', err);
+      }
     }
 
     // Apply style preset (after rotation, before watermark)

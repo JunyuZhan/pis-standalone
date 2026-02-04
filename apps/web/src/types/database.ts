@@ -48,6 +48,9 @@ export interface Database {
           color_grading: Json | null
           // 人工修图
           enable_human_retouch: boolean
+          // AI 修图
+          enable_ai_retouch: boolean
+          ai_retouch_config: Json
           // 分享配置
           share_title: string | null
           share_description: string | null
@@ -90,6 +93,8 @@ export interface Database {
           watermark_config?: Json
           color_grading?: Json | null
           enable_human_retouch?: boolean
+          enable_ai_retouch?: boolean
+          ai_retouch_config?: Json
           share_title?: string | null
           share_description?: string | null
           share_image_url?: string | null
@@ -125,6 +130,8 @@ export interface Database {
           watermark_config?: Json
           color_grading?: Json | null
           enable_human_retouch?: boolean
+          enable_ai_retouch?: boolean
+          ai_retouch_config?: Json
           share_title?: string | null
           share_description?: string | null
           share_image_url?: string | null

@@ -513,7 +513,7 @@ const worker = new Worker<PhotoJobData>(
             ? Promise.resolve({ data: cachedAlbum, error: null })
             : supabase
                 .from('albums')
-                .select('id, watermark_enabled, watermark_type, watermark_config, color_grading, enable_human_retouch')
+                .select('id, watermark_enabled, watermark_type, watermark_config, color_grading, enable_human_retouch, enable_ai_retouch, ai_retouch_config')
                 .eq('id', albumId)
                 .single()
         ]);
@@ -571,7 +571,15 @@ const worker = new Worker<PhotoJobData>(
       const processingBuffer = Buffer.from(originalBuffer);
       console.time(`[${job.id}] Process`);
       const processor = new PhotoProcessor(processingBuffer);
-      const result = await processor.process(watermarkConfig, photoRotation, stylePresetId);
+      const result = await processor.process(
+        watermarkConfig, 
+        photoRotation, 
+        stylePresetId,
+        {
+          enabled: album?.enable_ai_retouch ?? false,
+          config: album?.ai_retouch_config
+        }
+      );
       console.timeEnd(`[${job.id}] Process`);
 
       // 6. 上传处理后的图片到存储
