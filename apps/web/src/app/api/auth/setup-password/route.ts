@@ -11,8 +11,9 @@ import { z } from 'zod'
 // 初始化认证数据库（如果尚未初始化）
 try {
   initAuthDatabase()
-} catch {
+} catch (error) {
   // 可能已经初始化，忽略错误
+  console.log('Auth database initialization check:', error instanceof Error ? error.message : 'Already initialized')
 }
 
 /**
@@ -130,6 +131,7 @@ export async function POST(request: NextRequest) {
 
     // 执行密码设置
     try {
+      // 获取数据库实例（如果未初始化会抛出错误，由外层 catch 处理）
       const authDb = getAuthDatabase()
       
       // 查找用户
@@ -137,25 +139,45 @@ export async function POST(request: NextRequest) {
       
       if (!user) {
         // 如果用户不存在，检查是否系统处于未初始化状态（没有任何管理员）
+        // 如果系统未初始化，允许自动创建第一个管理员账户
         let isSystemUninitialized = false
-        if (authDb.hasAnyAdmin) {
-          const hasAdmin = await authDb.hasAnyAdmin()
-          isSystemUninitialized = !hasAdmin
+        try {
+          // PostgreSQLAuthDatabase 实现了 hasAnyAdmin 方法
+          if (authDb.hasAnyAdmin && typeof authDb.hasAnyAdmin === 'function') {
+            const hasAdmin = await authDb.hasAnyAdmin()
+            isSystemUninitialized = !hasAdmin
+          } else {
+            // 如果 hasAnyAdmin 方法不存在（不应该发生，但为了健壮性）
+            // 在首次设置场景中，假设系统未初始化，允许创建第一个管理员
+            // 这是安全的，因为这是首次设置密码的场景
+            console.warn('hasAnyAdmin method not available, assuming system uninitialized for first-time setup')
+            isSystemUninitialized = true
+          }
+        } catch (error) {
+          console.error('Error checking admin existence:', error)
+          // 出错时假设系统未初始化，允许创建第一个管理员
+          // 这是首次设置场景，允许创建是合理的
+          isSystemUninitialized = true
         }
 
         // 如果系统未初始化，允许自动创建管理员
         if (isSystemUninitialized) {
           console.log('System uninitialized, creating first admin user:', normalizedEmail)
-          const passwordHash = await hashPassword(password)
-          await authDb.createUser(normalizedEmail, passwordHash)
-          
-          return createSuccessResponse(
-            {
-              success: true,
-              message: '管理员账户创建并设置成功',
-            },
-            200
-          )
+          try {
+            const passwordHash = await hashPassword(password)
+            await authDb.createUser(normalizedEmail, passwordHash)
+            
+            return createSuccessResponse(
+              {
+                success: true,
+                message: '管理员账户创建并设置成功',
+              },
+              200
+            )
+          } catch (createError) {
+            console.error('Error creating admin user:', createError)
+            throw createError // 重新抛出错误，让外层 catch 处理
+          }
         }
 
         return NextResponse.json(
@@ -214,6 +236,12 @@ export async function POST(request: NextRequest) {
       )
     } catch (error) {
       console.error('Setup password error:', error)
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        email: normalizedEmail,
+        ip,
+      })
       
       const maskedEmail = normalizedEmail.length > 3 
         ? normalizedEmail.substring(0, 3) + '***' 
@@ -224,6 +252,7 @@ export async function POST(request: NextRequest) {
         ip,
         success: false,
         reason: 'internal_error',
+        errorMessage: error instanceof Error ? error.message : String(error),
         timestamp: new Date().toISOString(),
       }))
 
@@ -232,6 +261,10 @@ export async function POST(request: NextRequest) {
           error: {
             code: 'INTERNAL_ERROR',
             message: '密码设置失败，请重试',
+            // 仅在开发环境返回详细错误信息
+            ...(process.env.NODE_ENV === 'development' && {
+              details: error instanceof Error ? error.message : String(error),
+            }),
           },
         },
         {
@@ -241,8 +274,21 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('Setup password API error:', error)
+    console.error('Outer error details:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: '密码设置失败，请重试' } },
+      { 
+        error: { 
+          code: 'INTERNAL_ERROR', 
+          message: '密码设置失败，请重试',
+          // 仅在开发环境返回详细错误信息
+          ...(process.env.NODE_ENV === 'development' && {
+            details: error instanceof Error ? error.message : String(error),
+          }),
+        } 
+      },
       { status: 500 }
     )
   }

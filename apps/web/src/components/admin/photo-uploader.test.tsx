@@ -89,8 +89,12 @@ describe('PhotoUploader', () => {
     
     if (fileInput) {
       // 创建模拟文件
-      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg', size: 1024 })
-      const fileList = new FileList([file])
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+      Object.defineProperty(file, 'size', { value: 1024 })
+      
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(file)
+      const fileList = dataTransfer.files
       
       // Mock checkDuplicate API
       mockFetch.mockResolvedValueOnce({
@@ -122,8 +126,12 @@ describe('PhotoUploader', () => {
     
     if (fileInput) {
       // 创建不支持的文件类型（视频）
-      const file = new File(['test'], 'test.mp4', { type: 'video/mp4', size: 1024 })
-      const fileList = new FileList([file])
+      const file = new File(['test'], 'test.mp4', { type: 'video/mp4' })
+      Object.defineProperty(file, 'size', { value: 1024 })
+      
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(file)
+      const fileList = dataTransfer.files
       
       Object.defineProperty(fileInput, 'files', {
         value: fileList,
@@ -147,8 +155,12 @@ describe('PhotoUploader', () => {
     
     if (fileInput) {
       // 创建超大文件（> 100MB）
-      const file = new File(['test'], 'large.jpg', { type: 'image/jpeg', size: 101 * 1024 * 1024 })
-      const fileList = new FileList([file])
+      const file = new File(['test'], 'large.jpg', { type: 'image/jpeg' })
+      Object.defineProperty(file, 'size', { value: 101 * 1024 * 1024 })
+      
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(file)
+      const fileList = dataTransfer.files
       
       Object.defineProperty(fileInput, 'files', {
         value: fileList,
@@ -179,8 +191,12 @@ describe('PhotoUploader', () => {
     const fileInput = screen.getByLabelText(/点击选择文件/i).closest('label')?.querySelector('input[type="file"]') as HTMLInputElement
     
     if (fileInput) {
-      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg', size: 1024 })
-      const fileList = new FileList([file])
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+      Object.defineProperty(file, 'size', { value: 1024 })
+      
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(file)
+      const fileList = dataTransfer.files
       
       Object.defineProperty(fileInput, 'files', {
         value: fileList,

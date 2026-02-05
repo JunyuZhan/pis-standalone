@@ -41,7 +41,7 @@ export function FaceSearchModal({ albumSlug, isOpen, onClose, onSearch }: FaceSe
         showSuccess('未找到匹配的照片')
       } else {
         showSuccess(`找到 ${data.photos.length} 张照片`)
-        const photoIds = data.photos.map((p: any) => p.id)
+        const photoIds = data.photos.map((p: { id: string }) => p.id)
         onSearch(photoIds)
         onClose()
       }

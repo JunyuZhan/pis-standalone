@@ -182,17 +182,17 @@ describe('poster-generator', () => {
     it('should handle background image load error', async () => {
       const mockImg = new global.Image()
       mockImg.onerror = null
-      vi.mocked(global.document.createElement).mockImplementation((tag: string) => {
+      vi.mocked(global.document.createElement).mockImplementation(((tag: string) => {
         if (tag === 'canvas') return mockCanvas
         if (tag === 'img') {
           const img = { ...mockImage }
           setTimeout(() => {
-            if (img.onerror) img.onerror()
+            if (typeof img.onerror === 'function') (img.onerror as any)()
           }, 0)
           return img
         }
         return {}
-      })
+      }) as any)
 
       const result = await generatePoster({
         backgroundImageUrl: 'https://example.com/invalid.jpg',
@@ -236,10 +236,10 @@ describe('poster-generator', () => {
         click: vi.fn(),
       }
 
-      vi.mocked(global.document.createElement).mockImplementation((tag: string) => {
+      vi.mocked(global.document.createElement).mockImplementation(((tag: string) => {
         if (tag === 'a') return mockLink
         return {}
-      })
+      }) as any)
 
       const mockBody = {
         appendChild: vi.fn(),

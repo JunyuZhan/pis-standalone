@@ -8,7 +8,16 @@
 -- 创建必要的扩展
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";  -- 用于全文搜索
-CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 创建 vector 扩展（可选，用于人脸识别功能）
+-- 如果扩展不可用（如开发环境使用 postgres:16-alpine），会跳过但不影响其他功能
+DO $$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS vector;
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE NOTICE 'vector 扩展不可用，跳过创建（不影响其他功能）';
+END $$;
 
 -- ============================================
 -- 用户表（自定义认证模式使用）
@@ -17,7 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(500),  -- 允许 NULL，表示首次登录需要设置密码
-    role VARCHAR(50) DEFAULT 'admin',  -- admin, viewer
+    role VARCHAR(50) DEFAULT 'admin',  -- 用户角色: 'admin' (管理员), 'photographer' (摄影师), 'retoucher' (修图师), 'guest' (访客)
     is_active BOOLEAN DEFAULT true,
     last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -324,11 +333,31 @@ CREATE TRIGGER update_package_downloads_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
+-- 创建默认管理员账户
+-- ============================================
+-- 管理员账户在初始化时创建，但 password_hash 为 NULL
+-- 部署完成后，首次登录时会提示设置密码
+-- 这是安全的最佳实践：避免在初始化时设置默认密码
+INSERT INTO users (email, password_hash, role, is_active, created_at, updated_at)
+VALUES (
+    'admin@example.com',
+    NULL,  -- 密码未设置，首次登录时需要设置
+    'admin',
+    true,
+    NOW(),
+    NOW()
+)
+ON CONFLICT (email) DO NOTHING;
+
+-- ============================================
 -- 初始化完成提示
 -- ============================================
--- 注意：默认管理员账户由 init-postgresql.sh 脚本创建
 DO $$
+DECLARE
+    admin_count INTEGER;
 BEGIN
+    SELECT COUNT(*) INTO admin_count FROM users WHERE role = 'admin' AND is_active = true;
+    
     RAISE NOTICE '✅ PIS 数据库初始化完成！';
     RAISE NOTICE '   - users 表: 存储管理员账号（自定义认证模式）';
     RAISE NOTICE '   - albums 表: 存储相册信息';
@@ -337,4 +366,9 @@ BEGIN
     RAISE NOTICE '   - package_downloads 表: 存储打包下载任务';
     RAISE NOTICE '   - photo_groups 表: 存储照片分组';
     RAISE NOTICE '   - photo_group_assignments 表: 存储照片分组关联';
+    RAISE NOTICE '';
+    RAISE NOTICE '👤 管理员账户:';
+    RAISE NOTICE '   - 邮箱: admin@example.com';
+    RAISE NOTICE '   - 密码: 未设置（首次登录时需要设置）';
+    RAISE NOTICE '   - 活跃管理员数量: %', admin_count;
 END $$;

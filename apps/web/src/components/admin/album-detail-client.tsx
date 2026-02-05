@@ -165,9 +165,13 @@ export function AlbumDetailClient({ album, initialPhotos, mediaUrl: serverMediaU
     }
   }
 
-  // 切换回收站视图时重新加载照片
+  // 切换回收站视图时重新加载照片，并自动关闭上传组件
   useEffect(() => {
     loadPhotos(showDeleted)
+    // 切换到回收站视图时，自动关闭上传组件
+    if (showDeleted && showUploader) {
+      setShowUploader(false)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDeleted, album.id])
 
@@ -289,7 +293,7 @@ export function AlbumDetailClient({ album, initialPhotos, mediaUrl: serverMediaU
         setMediaUrl(safeClientMediaUrl)
       }
     }
-  }, []) // 只在客户端挂载时执行一次
+  }, [mediaUrl]) // 只在客户端挂载时执行一次
 
   // toggleSelection removed as it's not used
 

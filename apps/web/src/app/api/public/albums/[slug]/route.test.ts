@@ -9,15 +9,21 @@ import { GET } from './route'
 import { createMockRequest } from '@/test/test-utils'
 
 // Mock dependencies
-vi.mock('@/lib/supabase/server', () => {
-  const mockSupabaseClient = {
-    from: vi.fn(),
-  }
-
+const { mockSupabaseClient } = vi.hoisted(() => {
   return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+    mockSupabaseClient: {
+      from: vi.fn(),
+    }
   }
 })
+
+vi.mock('@/lib/database', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+}))
+
+vi.mock('@/lib/supabase/server', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+}))
 
 describe('GET /api/public/albums/[slug]', () => {
   let mockSupabaseClient: any
@@ -25,7 +31,7 @@ describe('GET /api/public/albums/[slug]', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     
-    const { createClient } = await import('@/lib/supabase/server')
+    const { createClient } = await import('@/lib/database')
     mockSupabaseClient = await createClient()
   })
 
@@ -126,7 +132,7 @@ describe('GET /api/public/albums/[slug]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(404)
-      expect(data.error.code).toBe('ALBUM_NOT_FOUND')
+      expect(data.error.code).toBe('NOT_FOUND')
     })
 
     it('should return 404 if album is deleted', async () => {
@@ -150,7 +156,7 @@ describe('GET /api/public/albums/[slug]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(404)
-      expect(data.error.code).toBe('ALBUM_NOT_FOUND')
+      expect(data.error.code).toBe('NOT_FOUND')
     })
   })
 
@@ -182,7 +188,7 @@ describe('GET /api/public/albums/[slug]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(404)
-      expect(data.error.code).toBe('ALBUM_NOT_FOUND')
+      expect(data.error.code).toBe('NOT_FOUND')
     })
 
     it('should return 403 if album is expired', async () => {
@@ -216,7 +222,7 @@ describe('GET /api/public/albums/[slug]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(403)
-      expect(data.error.code).toBe('EXPIRED')
+      expect(data.error.code).toBe('FORBIDDEN')
       expect(data.error.message).toContain('已过期')
     })
 

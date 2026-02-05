@@ -104,11 +104,29 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
   const router = useRouter()
   const [files, setFiles] = useState<UploadFile[]>([])
   const [isDragging, setIsDragging] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const [isIOS, setIsIOS] = useState(false)
   const completedTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
   const xhrMapRef = useRef<Map<string, XMLHttpRequest>>(new Map())
   const uploadQueueRef = useRef<string[]>([]) // 等待上传的文件 ID 队列
   const isProcessingQueueRef = useRef(false)
   const onCompleteCalledRef = useRef(false) // 跟踪 onComplete 是否已调用
+
+  // 检测移动设备和iOS
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    
+    // 检测移动设备
+    const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    setIsMobile(mobile)
+    
+    // 检测iOS
+    interface WindowMSStream extends Window {
+      MSStream?: unknown
+    }
+    const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as WindowMSStream).MSStream
+    setIsIOS(iOS)
+  }, [])
 
   // 自动移除已完成的上传项（延迟2秒后移除，让用户看到成功反馈）
   useEffect(() => {
@@ -356,7 +374,7 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
 
     // 开始处理队列
     setTimeout(processQueue, 0)
-  }, [processQueue, albumId])
+  }, [processQueue, albumId, files])
 
   // getWorkerUrl removed as it's not used
 
@@ -1591,14 +1609,59 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
           }}
           className="hidden"
         />
-        <label htmlFor="file-input" className="cursor-pointer">
+        <label htmlFor="file-input" className="cursor-pointer block">
           <Upload className="w-10 h-10 md:w-12 md:h-12 text-text-muted mx-auto mb-3 md:mb-4" />
           <p className="text-base md:text-lg font-medium mb-1 md:mb-2">
             点击选择文件<span className="hidden md:inline">，或拖拽照片到此处</span>
           </p>
-          <p className="text-text-secondary text-xs md:text-sm">
+          <p className="text-text-secondary text-xs md:text-sm mb-2">
             支持 JPG、PNG、HEIC、WebP 格式，单文件最大 100MB
           </p>
+          {isMobile && (
+            <div className="mt-3 p-3 bg-surface-elevated rounded-lg border border-border text-left">
+              <p className="text-xs font-medium text-text-primary mb-2">
+                📱 移动端选择说明：
+              </p>
+              {isIOS ? (
+                <div className="text-xs text-text-secondary space-y-1.5">
+                  <p className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">ℹ</span>
+                    <span><strong>默认打开</strong>：点击后会打开手机相册（Photos），不是相机存储卡</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="text-green-400 mt-0.5">✓</span>
+                    <span><strong>从相册选择</strong>：支持多选，可<strong>滑动选择</strong>多张照片（推荐）</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="text-yellow-400 mt-0.5">⚠</span>
+                    <span><strong>浏览文件系统</strong>：需要点击"浏览"或"文件"，但iOS限制只能<strong>单张点击选择</strong>，不能滑动</span>
+                  </p>
+                  <div className="pl-6 pt-1 space-y-1 text-text-muted">
+                    <p>• <strong>相机存储卡照片</strong>：建议先导入手机相册，然后从相册多选上传</p>
+                    <p>• <strong>USB连接相机</strong>：在文件选择器中找到"USB存储"或相机名称，但只能单选</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-text-secondary space-y-1.5">
+                  <p className="flex items-start gap-2">
+                    <span className="text-blue-400 mt-0.5">ℹ</span>
+                    <span><strong>默认打开</strong>：可能打开相册或文件管理器，取决于浏览器设置</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="text-green-400 mt-0.5">✓</span>
+                    <span><strong>多选方法</strong>：<strong>长按第一张照片</strong>进入选择模式，然后点击其他照片多选</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="text-green-400 mt-0.5">✓</span>
+                    <span>或点击右上角菜单选择<strong>"选择多个"</strong>，然后可滑动选择</span>
+                  </p>
+                  <div className="pl-6 pt-1 space-y-1 text-text-muted">
+                    <p>• <strong>相机存储卡</strong>：在文件管理器中找到相机存储卡（通常显示为USB存储），支持多选</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </label>
       </div>
 

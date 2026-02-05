@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json()
     } catch {
-      return handleError(new Error('请求格式错误'), '请求体格式错误')
+      return ApiError.badRequest('请求体格式错误')
     }
 
     // 验证输入

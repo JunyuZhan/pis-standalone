@@ -9,21 +9,22 @@ import { GET, PATCH } from './route'
 import { createMockRequest } from '@/test/test-utils'
 
 // Mock dependencies
-vi.mock('@/lib/database', () => {
-  const mockAdminClient = {
-    from: vi.fn(),
-    update: vi.fn(),
-  }
-
-  const mockSupabaseClient = {
-    from: vi.fn(),
-  }
-
+const { mockAdminClient, mockSupabaseClient } = vi.hoisted(() => {
   return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
-    createAdminClient: vi.fn().mockResolvedValue(mockAdminClient),
+    mockAdminClient: {
+      from: vi.fn(),
+      update: vi.fn(),
+    },
+    mockSupabaseClient: {
+      from: vi.fn(),
+    }
   }
 })
+
+vi.mock('@/lib/database', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+  createAdminClient: vi.fn().mockResolvedValue(mockAdminClient),
+}))
 
 describe('GET /api/public/photos/[id]/select', () => {
   let mockSupabaseClient: any

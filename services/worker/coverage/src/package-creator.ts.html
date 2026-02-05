@@ -23,9 +23,9 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">69.23% </span>
+                <span class="strong">68.62% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>36/52</span>
+                <span class='fraction'>35/51</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">70% </span>
+                <span class="strong">69.38% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>35/50</span>
+                <span class='fraction'>34/49</span>
             </div>
         
             
@@ -209,23 +209,7 @@
 <a name='L144'></a><a href='#L144'>144</a>
 <a name='L145'></a><a href='#L145'>145</a>
 <a name='L146'></a><a href='#L146'>146</a>
-<a name='L147'></a><a href='#L147'>147</a>
-<a name='L148'></a><a href='#L148'>148</a>
-<a name='L149'></a><a href='#L149'>149</a>
-<a name='L150'></a><a href='#L150'>150</a>
-<a name='L151'></a><a href='#L151'>151</a>
-<a name='L152'></a><a href='#L152'>152</a>
-<a name='L153'></a><a href='#L153'>153</a>
-<a name='L154'></a><a href='#L154'>154</a>
-<a name='L155'></a><a href='#L155'>155</a>
-<a name='L156'></a><a href='#L156'>156</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L147'></a><a href='#L147'>147</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -356,8 +340,6 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -375,7 +357,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import archiver from 'archiver';
 import { downloadFile } from './lib/storage/index.js';
-import { PhotoProcessor } from './processor.js';
+import { PhotoProcessor, type SingleWatermark } from './processor.js';
 &nbsp;
 export interface PackageOptions {
   photos: Array&lt;{
@@ -388,14 +370,7 @@ export interface PackageOptions {
   watermarkConfig?: {
     enabled: boolean;
     type?: 'text' | 'logo';
-    watermarks?: Array&lt;{
-      type: 'text' | 'logo';
-      text?: string;
-      logoUrl?: string;
-      opacity: number;
-      position: string;
-      enabled?: boolean;
-    }&gt;;
+    watermarks?: Array&lt;SingleWatermark&gt;;
     [key: string]: any;
   };
   includeWatermarked: boolean;
@@ -477,13 +452,13 @@ export class PackageCreator {
                         } catch {
                           // 如果预览图不存在，重新处理添加水印
                           const processor = <span class="cstat-no" title="statement not covered" >new PhotoProcessor(originalBuffer);</span>
-                          const result = <span class="cstat-no" title="statement not covered" >await processor.process(watermarkConfig);</span>
+                          const result = <span class="cstat-no" title="statement not covered" >await processor.process(watermarkConfig as any);</span>
 <span class="cstat-no" title="statement not covered" >                          watermarkedBuffer = result.previewBuffer;</span>
                         }
                       } else <span class="missing-if-branch" title="else path not taken" >E</span>{
                         // 重新处理添加水印
                         const processor = <span class="cstat-no" title="statement not covered" >new PhotoProcessor(originalBuffer);</span>
-                        const result = <span class="cstat-no" title="statement not covered" >await processor.process(watermarkConfig);</span>
+                        const result = <span class="cstat-no" title="statement not covered" >await processor.process(watermarkConfig as any);</span>
 <span class="cstat-no" title="statement not covered" >                        watermarkedBuffer = result.previewBuffer;</span>
                       }
                     } else <span class="missing-if-branch" title="else path not taken" >E</span>{
@@ -512,8 +487,6 @@ export class PackageCreator {
             }
           }
           
-          console.log(`[PackageCreator] Processed ${processedCount} photos, ${failedCount} failed`);
-          
           <span class="missing-if-branch" title="if path not taken" >I</span>if (processedCount === 0) {
 <span class="cstat-no" title="statement not covered" >            throw new Error('No photos were successfully processed');</span>
           }
@@ -535,7 +508,7 @@ export class PackageCreator {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-01-27T02:29:53.294Z
+                at 2026-02-04T09:12:31.949Z
             </div>
         <script src="../prettify.js"></script>
         <script>

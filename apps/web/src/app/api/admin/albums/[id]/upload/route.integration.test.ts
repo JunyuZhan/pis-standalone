@@ -125,11 +125,13 @@ describe.skipIf(!shouldRunIntegrationTests)('POST /api/admin/albums/[id]/upload 
     expect(data.albumId).toBe(testAlbumId)
 
     // 验证数据库中的记录
-    const { data: photo, error } = await adminClient
+    const { data: photoData, error } = await adminClient
       .from('photos')
       .select('*')
       .eq('id', data.photoId)
       .single()
+
+    const photo = photoData as any
 
     expect(error).toBeNull()
     expect(photo).toBeDefined()

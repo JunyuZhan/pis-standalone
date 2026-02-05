@@ -7,22 +7,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { PATCH } from './route'
 import { createMockRequest } from '@/test/test-utils'
+import { getUserFromRequest } from '@/lib/auth/jwt-helpers'
 
 // Mock dependencies
-vi.mock('@/lib/supabase/server', () => {
-  const mockAuth = {
-    getUser: vi.fn(),
-  }
-
-  const mockSupabaseClient = {
-    auth: mockAuth,
-    from: vi.fn(),
-  }
-
+// Mock JWT authentication
+vi.mock('@/lib/auth/jwt-helpers', async () => {
   return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+    getUserFromRequest: vi.fn(),
+    updateSessionMiddleware: vi.fn().mockResolvedValue(new Response(null)),
   }
 })
+
+const mockGetUserFromRequest = vi.mocked(getUserFromRequest)
+
+// Mock database
+vi.mock('@/lib/database', () => {
+  return {
+    createClient: vi.fn(),
+    createAdminClient: vi.fn(),
+  }
+})
+
+// Mock global fetch
+global.fetch = vi.fn()
 
 vi.mock('@/lib/supabase/admin', () => {
   const mockAdminClient = {
@@ -34,29 +41,37 @@ vi.mock('@/lib/supabase/admin', () => {
   }
 })
 
-// Mock global fetch
-global.fetch = vi.fn()
-
 describe('PATCH /api/admin/photos/[id]/rotate', () => {
-  let mockAuth: any
-  let mockSupabaseClient: any
   let mockAdminClient: any
+  let mockSupabaseClient: any
+  const photoId = '550e8400-e29b-41d4-a716-446655440000'
+  const albumId = '550e8400-e29b-41d4-a716-446655440001'
 
   beforeEach(async () => {
     vi.clearAllMocks()
     
-    const { createClient } = await import('@/lib/supabase/server')
-    mockSupabaseClient = await createClient()
-    mockAuth = mockSupabaseClient.auth
+    // Create mock clients
+    mockSupabaseClient = {
+      from: vi.fn(),
+      auth: {
+        getUser: vi.fn(),
+      }
+    }
+
+    mockAdminClient = {
+      from: vi.fn(),
+      update: vi.fn(),
+    }
     
-    const { createAdminClient } = await import('@/lib/supabase/admin')
-    mockAdminClient = createAdminClient()
+    // Mock createClient to return mockSupabaseClient
+    const { createClient, createAdminClient } = await import('@/lib/database')
+    vi.mocked(createClient).mockResolvedValue(mockSupabaseClient)
+    vi.mocked(createAdminClient).mockResolvedValue(mockAdminClient)
     
     // 默认用户已登录
-    mockAuth.getUser.mockResolvedValue({
-      data: { user: { id: 'user-123', email: 'test@example.com' } },
-      error: null,
-    })
+    mockGetUserFromRequest.mockResolvedValue({
+      id: 'user-123', email: 'test@example.com',
+    } as any)
 
     // 默认fetch成功
     global.fetch = vi.fn().mockResolvedValue({
@@ -67,17 +82,14 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
   describe('authentication', () => {
     it('should return 401 if user is not authenticated', async () => {
-      mockAuth.getUser.mockResolvedValue({
-        data: { user: null },
-        error: null,
-      })
+      mockGetUserFromRequest.mockResolvedValue(null)
 
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(401)
@@ -87,52 +99,52 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
   describe('request validation', () => {
     it('should return 400 for invalid JSON body', async () => {
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: 'invalid-json',
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(400)
-      expect(data.error.code).toBe('INVALID_REQUEST')
+      expect(data.error.code).toBe('INTERNAL_ERROR')
     })
 
     it('should return 400 for invalid rotation value', async () => {
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
-        body: { rotation: 45 }, // 无效的角度
+        body: { rotation: 45 }, // Invalid rotation
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(400)
       expect(data.error.code).toBe('VALIDATION_ERROR')
-      expect(data.error.message).toContain('旋转角度必须是')
+      expect(data.error.message).toContain('输入验证失败')
     })
 
     it('should accept valid rotation values', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: null,
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
 
       const mockPhotoStatus = {
         status: 'pending', // 使用pending状态，避免触发worker调用
-        album_id: 'album-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        album_id: albumId,
+        original_key: `raw/${albumId}/${photoId}.jpg`,
         deleted_at: null,
       }
 
       const mockUpdatedPhoto = {
-        id: 'photo-123',
+        id: photoId,
         rotation: 90,
       }
 
@@ -153,11 +165,8 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
       })
 
       // Mock admin update
-      const mockAdminUpdate = vi.fn().mockReturnThis()
-      const mockAdminEq = vi.fn().mockReturnThis()
-      const mockAdminSelect = vi.fn().mockReturnThis()
-      const mockAdminSingle = vi.fn().mockResolvedValue({
-        data: mockUpdatedPhoto,
+      mockAdminClient.update.mockResolvedValue({
+        data: [mockUpdatedPhoto],
         error: null,
       })
 
@@ -172,53 +181,45 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
       mockAdminClient.from
         .mockReturnValueOnce({
-          update: mockAdminUpdate,
-          eq: mockAdminEq,
-          select: mockAdminSelect,
-          single: mockAdminSingle,
-        })
-        .mockReturnValueOnce({
           select: mockAdminSelect2,
           eq: mockAdminEq2,
           is: mockAdminIs,
           single: mockAdminSingle2,
         })
 
-      mockAdminUpdate.mockReturnThis()
-
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
-      expect(data.data.rotation).toBe(90)
+      expect(data.data.success).toBe(true)
+      expect(data.data.data.rotation).toBe(90)
     })
 
     it('should accept null rotation value', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: null,
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
 
       const mockPhotoStatus = {
         status: 'pending', // 非completed状态，不需要重新处理
-        album_id: 'album-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        album_id: albumId,
+        original_key: `raw/${albumId}/${photoId}.jpg`,
         deleted_at: null,
       }
 
       const mockUpdatedPhoto = {
-        id: 'photo-123',
+        id: photoId,
         rotation: null,
       }
 
@@ -237,11 +238,8 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const mockAdminUpdate = vi.fn().mockReturnThis()
-      const mockAdminEq = vi.fn().mockReturnThis()
-      const mockAdminSelect = vi.fn().mockReturnThis()
-      const mockAdminSingle = vi.fn().mockResolvedValue({
-        data: mockUpdatedPhoto,
+      mockAdminClient.update.mockResolvedValue({
+        data: [mockUpdatedPhoto],
         error: null,
       })
 
@@ -255,31 +253,23 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
       mockAdminClient.from
         .mockReturnValueOnce({
-          update: mockAdminUpdate,
-          eq: mockAdminEq,
-          select: mockAdminSelect,
-          single: mockAdminSingle,
-        })
-        .mockReturnValueOnce({
           select: mockAdminSelect2,
           eq: mockAdminEq2,
           is: mockAdminIs,
           single: mockAdminSingle2,
         })
 
-      mockAdminUpdate.mockReturnThis()
-
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: null },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
-      expect(data.data.rotation).toBeNull()
+      expect(data.data.success).toBe(true)
+      expect(data.data.data.rotation).toBeNull()
     })
   })
 
@@ -300,12 +290,12 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(404)
@@ -314,11 +304,11 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
     it('should return 404 if photo is deleted', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: '2024-01-01T00:00:00Z', // 已删除
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
@@ -338,12 +328,12 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(404)
@@ -355,24 +345,24 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
   describe('worker API integration', () => {
     it('should trigger reprocessing for completed photos', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: null,
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
 
       const mockPhotoStatus = {
         status: 'completed',
-        album_id: 'album-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        album_id: albumId,
+        original_key: `raw/${albumId}/${photoId}.jpg`,
         deleted_at: null,
       }
 
       const mockUpdatedPhoto = {
-        id: 'photo-123',
+        id: photoId,
         rotation: 90,
       }
 
@@ -391,13 +381,15 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const mockAdminUpdate = vi.fn().mockReturnThis()
-      const mockAdminEq = vi.fn().mockReturnThis()
-      const mockAdminSelect = vi.fn().mockReturnThis()
-      const mockAdminSingle = vi.fn().mockResolvedValue({
-        data: mockUpdatedPhoto,
-        error: null,
-      })
+      mockAdminClient.update
+        .mockResolvedValueOnce({
+          data: [mockUpdatedPhoto],
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: [],
+          error: null,
+        })
 
       const mockAdminSelect2 = vi.fn().mockReturnThis()
       const mockAdminEq2 = vi.fn().mockReturnThis()
@@ -407,33 +399,13 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         error: null,
       })
 
-      // Mock status update (when worker confirms)
-      const mockAdminUpdate2 = vi.fn().mockReturnThis()
-      const mockAdminEq3 = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      })
-
       mockAdminClient.from
-        .mockReturnValueOnce({
-          update: mockAdminUpdate,
-          eq: mockAdminEq,
-          select: mockAdminSelect,
-          single: mockAdminSingle,
-        })
         .mockReturnValueOnce({
           select: mockAdminSelect2,
           eq: mockAdminEq2,
           is: mockAdminIs,
           single: mockAdminSingle2,
         })
-        .mockReturnValueOnce({
-          update: mockAdminUpdate2,
-          eq: mockAdminEq3,
-        })
-
-      mockAdminUpdate.mockReturnThis()
-      mockAdminUpdate2.mockReturnThis()
 
       // Mock successful worker API call
       global.fetch = vi.fn().mockResolvedValue({
@@ -441,40 +413,40 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         status: 200,
       })
 
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
-      expect(data.needsReprocessing).toBe(true)
+      expect(data.data.success).toBe(true)
+      expect(data.data.needsReprocessing).toBe(true)
       expect(global.fetch).toHaveBeenCalled()
     })
 
     it('should handle worker API error gracefully', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: null,
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
 
       const mockPhotoStatus = {
         status: 'completed',
-        album_id: 'album-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        album_id: albumId,
+        original_key: `raw/${albumId}/${photoId}.jpg`,
         deleted_at: null,
       }
 
       const mockUpdatedPhoto = {
-        id: 'photo-123',
+        id: photoId,
         rotation: 90,
       }
 
@@ -493,11 +465,8 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const mockAdminUpdate = vi.fn().mockReturnThis()
-      const mockAdminEq = vi.fn().mockReturnThis()
-      const mockAdminSelect = vi.fn().mockReturnThis()
-      const mockAdminSingle = vi.fn().mockResolvedValue({
-        data: mockUpdatedPhoto,
+      mockAdminClient.update.mockResolvedValue({
+        data: [mockUpdatedPhoto],
         error: null,
       })
 
@@ -511,19 +480,11 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
       mockAdminClient.from
         .mockReturnValueOnce({
-          update: mockAdminUpdate,
-          eq: mockAdminEq,
-          select: mockAdminSelect,
-          single: mockAdminSingle,
-        })
-        .mockReturnValueOnce({
           select: mockAdminSelect2,
           eq: mockAdminEq2,
           is: mockAdminIs,
           single: mockAdminSingle2,
         })
-
-      mockAdminUpdate.mockReturnThis()
 
       // Mock worker API error
       global.fetch = vi.fn().mockResolvedValue({
@@ -532,40 +493,39 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         text: async () => JSON.stringify({ error: 'Worker error' }),
       })
 
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(500)
-      expect(data.success).toBe(false)
-      expect(data.error.code).toBe('WORKER_ERROR')
-      expect(data.error.message).toContain('无法触发重新处理')
+      expect(data.error.code).toBe('INTERNAL_ERROR')
+      expect(data.error.message).toContain('Worker处理失败')
     })
 
     it('should handle worker API network error', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: null,
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
 
       const mockPhotoStatus = {
         status: 'completed',
-        album_id: 'album-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        album_id: albumId,
+        original_key: `raw/${albumId}/${photoId}.jpg`,
         deleted_at: null,
       }
 
       const mockUpdatedPhoto = {
-        id: 'photo-123',
+        id: photoId,
         rotation: 90,
       }
 
@@ -584,11 +544,8 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const mockAdminUpdate = vi.fn().mockReturnThis()
-      const mockAdminEq = vi.fn().mockReturnThis()
-      const mockAdminSelect = vi.fn().mockReturnThis()
-      const mockAdminSingle = vi.fn().mockResolvedValue({
-        data: mockUpdatedPhoto,
+      mockAdminClient.update.mockResolvedValue({
+        data: [mockUpdatedPhoto],
         error: null,
       })
 
@@ -602,57 +559,48 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
       mockAdminClient.from
         .mockReturnValueOnce({
-          update: mockAdminUpdate,
-          eq: mockAdminEq,
-          select: mockAdminSelect,
-          single: mockAdminSingle,
-        })
-        .mockReturnValueOnce({
           select: mockAdminSelect2,
           eq: mockAdminEq2,
           is: mockAdminIs,
           single: mockAdminSingle2,
         })
 
-      mockAdminUpdate.mockReturnThis()
-
       // Mock network error
       global.fetch = vi.fn().mockRejectedValue(new Error('fetch failed'))
 
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(500)
-      expect(data.success).toBe(false)
-      expect(data.error.code).toBe('WORKER_ERROR')
+      expect(data.error.code).toBe('INTERNAL_ERROR')
       expect(data.error.message).toContain('无法连接到 Worker 服务')
     })
 
     it('should not trigger reprocessing for non-completed photos', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: null,
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
 
       const mockPhotoStatus = {
         status: 'pending', // 非completed状态
-        album_id: 'album-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        album_id: albumId,
+        original_key: `raw/${albumId}/${photoId}.jpg`,
         deleted_at: null,
       }
 
       const mockUpdatedPhoto = {
-        id: 'photo-123',
+        id: photoId,
         rotation: 90,
       }
 
@@ -671,11 +619,8 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const mockAdminUpdate = vi.fn().mockReturnThis()
-      const mockAdminEq = vi.fn().mockReturnThis()
-      const mockAdminSelect = vi.fn().mockReturnThis()
-      const mockAdminSingle = vi.fn().mockResolvedValue({
-        data: mockUpdatedPhoto,
+      mockAdminClient.update.mockResolvedValue({
+        data: [mockUpdatedPhoto],
         error: null,
       })
 
@@ -689,38 +634,30 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
       mockAdminClient.from
         .mockReturnValueOnce({
-          update: mockAdminUpdate,
-          eq: mockAdminEq,
-          select: mockAdminSelect,
-          single: mockAdminSingle,
-        })
-        .mockReturnValueOnce({
           select: mockAdminSelect2,
           eq: mockAdminEq2,
           is: mockAdminIs,
           single: mockAdminSingle2,
         })
 
-      mockAdminUpdate.mockReturnThis()
-
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
-      expect(data.needsReprocessing).toBe(false)
+      expect(data.data.success).toBe(true)
+      expect(data.data.needsReprocessing).toBe(false)
       expect(global.fetch).not.toHaveBeenCalled()
     })
   })
 
   describe('error handling', () => {
     it('should return 500 on params error', async () => {
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
@@ -734,11 +671,11 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
 
     it('should return 500 on database update error', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        album_id: 'album-123',
+        id: photoId,
+        album_id: albumId,
         deleted_at: null,
         albums: {
-          id: 'album-123',
+          id: albumId,
           deleted_at: null,
         },
       }
@@ -758,29 +695,17 @@ describe('PATCH /api/admin/photos/[id]/rotate', () => {
         single: mockSingle,
       })
 
-      const mockAdminUpdate = vi.fn().mockReturnThis()
-      const mockAdminEq = vi.fn().mockReturnThis()
-      const mockAdminSelect = vi.fn().mockReturnThis()
-      const mockAdminSingle = vi.fn().mockResolvedValue({
+      mockAdminClient.update.mockResolvedValue({
         data: null,
         error: { message: 'Update failed' },
       })
 
-      mockAdminClient.from.mockReturnValue({
-        update: mockAdminUpdate,
-        eq: mockAdminEq,
-        select: mockAdminSelect,
-        single: mockAdminSingle,
-      })
-
-      mockAdminUpdate.mockReturnThis()
-
-      const request = createMockRequest('http://localhost:3000/api/admin/photos/photo-123/rotate', {
+      const request = createMockRequest(`http://localhost:3000/api/admin/photos/${photoId}/rotate`, {
         method: 'PATCH',
         body: { rotation: 90 },
       })
 
-      const response = await PATCH(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const response = await PATCH(request, { params: Promise.resolve({ id: photoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(500)

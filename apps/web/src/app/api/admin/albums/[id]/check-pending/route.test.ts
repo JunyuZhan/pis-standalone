@@ -39,14 +39,14 @@ describe('POST /api/admin/albums/[id]/check-pending', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/check-pending',
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/check-pending',
         {
           method: 'POST',
         }
       )
 
       const response = await POST(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 
@@ -102,12 +102,13 @@ describe('POST /api/admin/albums/[id]/check-pending', () => {
       expect(response.status).toBe(200)
       expect(data).toEqual(workerResponse)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3000/api/worker/check-pending',
+        '/api/worker/check-pending',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
             'Content-Type': 'application/json',
           }),
+          body: JSON.stringify({ albumId }),
         })
       )
     })

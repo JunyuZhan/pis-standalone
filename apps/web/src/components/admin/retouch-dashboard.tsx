@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Download, Upload, CheckCircle, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw, Download, Upload } from 'lucide-react'
 import { getSafeMediaUrl } from '@/lib/utils'
 import { showSuccess, showError } from '@/lib/toast'
 
@@ -33,13 +33,29 @@ export function RetouchDashboard() {
     try {
       setLoading(true)
       const res = await fetch('/api/admin/retouch/tasks')
+      
+      if (!res.ok) {
+        // 尝试解析错误响应
+        let errorMessage = '获取任务失败'
+        try {
+          const errorData = await res.json()
+          errorMessage = errorData.error?.message || errorMessage
+        } catch {
+          // 如果响应不是 JSON，使用状态文本
+          errorMessage = `获取任务失败: ${res.status} ${res.statusText}`
+        }
+        throw new Error(errorMessage)
+      }
+      
       const json = await res.json()
       if (json.data) {
         setTasks(json.data)
+      } else {
+        setTasks([])
       }
     } catch (err) {
       console.error(err)
-      showError('获取任务失败')
+      showError(err instanceof Error ? err.message : '获取任务失败')
     } finally {
       setLoading(false)
     }
@@ -82,7 +98,6 @@ export function RetouchDashboard() {
       // 2. 上传文件到 MinIO (使用 PUT 方法直接上传)
       // 注意：这里使用 Worker 的代理 URL 或者直接 URL
       // 如果是 presigned URL，通常是 PUT
-      const workerDirectUrl = process.env.NEXT_PUBLIC_WORKER_URL || 'http://localhost:3001'
       
       // 这里的 uploadUrl 是完整的 URL 吗？
       // 取决于 /api/worker/presign 的实现。
@@ -127,9 +142,9 @@ export function RetouchDashboard() {
       // 刷新列表
       fetchTasks()
       
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err)
-      showError(err.message || '上传失败')
+      showError((err as Error).message || '上传失败')
     } finally {
       setUploadingId(null)
       setSelectedTaskId(null)

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { PackageDownloadButton } from './package-download-button'
+import { showError } from '@/lib/toast'
 
 // Mock fetch
 const mockFetch = vi.fn()
@@ -233,7 +234,6 @@ describe('PackageDownloadButton', () => {
 
   it('应该处理创建失败', async () => {
     const user = userEvent.setup()
-    const { showError } = await import('@/lib/toast')
     mockFetch.mockResolvedValueOnce({
       ok: false,
       json: async () => ({ error: { message: '创建失败' } }),

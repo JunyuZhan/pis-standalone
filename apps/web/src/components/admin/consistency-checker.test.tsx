@@ -17,8 +17,8 @@ describe('ConsistencyChecker', () => {
     
     expect(screen.getByText('检查选项')).toBeInTheDocument()
     expect(screen.getByText('自动修复不一致记录')).toBeInTheDocument()
-    expect(screen.getByText('删除孤儿文件（存储中存在但数据库无记录）')).toBeInTheDocument()
-    expect(screen.getByText('删除孤儿记录（数据库存在但存储中无文件）')).toBeInTheDocument()
+    expect(screen.getByText('删除孤立文件')).toBeInTheDocument()
+    expect(screen.getByText('删除孤立记录')).toBeInTheDocument()
     expect(screen.getByText('批次大小:')).toBeInTheDocument()
   })
 
@@ -36,7 +36,7 @@ describe('ConsistencyChecker', () => {
     const user = userEvent.setup()
     render(<ConsistencyChecker />)
     
-    const autoFixCheckbox = screen.getByLabelText('自动修复不一致记录')
+    const autoFixCheckbox = screen.getByLabelText(/^自动修复不一致记录/)
     expect(autoFixCheckbox).not.toBeChecked()
     
     await user.click(autoFixCheckbox)
@@ -196,6 +196,10 @@ describe('ConsistencyChecker', () => {
       ok: true,
       json: async () => ({ success: true, result: {} }),
     })
+
+    await waitFor(() => {
+      expect(screen.queryByText('检查中...')).not.toBeInTheDocument()
+    })
   })
 
   it('应该发送正确的请求体', async () => {
@@ -209,9 +213,9 @@ describe('ConsistencyChecker', () => {
     render(<ConsistencyChecker />)
     
     // 启用所有选项
-    await user.click(screen.getByLabelText('自动修复不一致记录'))
-    await user.click(screen.getByLabelText('删除孤儿文件（存储中存在但数据库无记录）'))
-    await user.click(screen.getByLabelText('删除孤儿记录（数据库存在但存储中无文件）'))
+    await user.click(screen.getByLabelText(/^自动修复不一致记录/))
+    await user.click(screen.getByLabelText(/^删除孤立文件/))
+    await user.click(screen.getByLabelText(/^删除孤立记录/))
     
     // 修改批次大小 - 直接设置value并触发change事件
     const batchSizeInput = screen.getByText('批次大小:').parentElement?.querySelector('input[type="number"]') as HTMLInputElement

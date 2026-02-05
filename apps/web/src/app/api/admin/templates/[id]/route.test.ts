@@ -97,7 +97,6 @@ describe('GET /api/admin/templates/[id]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
       expect(data.data.id).toBe(templateId)
       expect(data.data.name).toBe('Template 1')
     })
@@ -222,7 +221,6 @@ describe('PATCH /api/admin/templates/[id]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
       expect(data.data.name).toBe('Updated Template')
     })
 
@@ -254,7 +252,6 @@ describe('PATCH /api/admin/templates/[id]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
     })
 
     it('should handle database errors', async () => {
@@ -362,7 +359,6 @@ describe('DELETE /api/admin/templates/[id]', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
       expect(data.data.success).toBe(true)
     })
 

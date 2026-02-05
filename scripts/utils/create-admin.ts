@@ -1,14 +1,22 @@
 #!/usr/bin/env tsx
 /**
- * 创建管理员账户脚本
+ * 创建用户账户脚本
  * 
  * 使用方法:
  *   pnpm create-admin
  *   pnpm exec tsx scripts/utils/create-admin.ts
  *   tsx scripts/utils/create-admin.ts
  * 
- * 或指定邮箱和密码（非交互式）:
- *   tsx scripts/utils/create-admin.ts admin@example.com your-password
+ * 或指定邮箱、密码和角色（非交互式）:
+ *   tsx scripts/utils/create-admin.ts admin@example.com your-password admin
+ *   tsx scripts/utils/create-admin.ts photographer@example.com password123 photographer
+ *   tsx scripts/utils/create-admin.ts retoucher@example.com password123 retoucher
+ * 
+ * 支持的角色:
+ *   - admin (管理员，默认)
+ *   - photographer (摄影师)
+ *   - retoucher (修图师)
+ *   - guest (访客)
  */
 
 import * as dotenv from 'dotenv'
@@ -19,8 +27,18 @@ import { readFileSync } from 'fs'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-// 加载环境变量
-dotenv.config({ path: join(__dirname, '..', '.env') })
+// 加载环境变量（从项目根目录）
+// 支持多种路径：项目根目录、scripts 目录
+const rootEnvPath = join(__dirname, '../../.env')
+const scriptsEnvPath = join(__dirname, '../.env')
+if (require('fs').existsSync(rootEnvPath)) {
+  dotenv.config({ path: rootEnvPath })
+} else if (require('fs').existsSync(scriptsEnvPath)) {
+  dotenv.config({ path: scriptsEnvPath })
+} else {
+  // 尝试从当前工作目录加载
+  dotenv.config()
+}
 
 // 简单的密码哈希函数（与 apps/web/src/lib/auth/index.ts 保持一致）
 import { pbkdf2, randomBytes } from 'crypto'
@@ -39,7 +57,11 @@ async function hashPassword(password: string): Promise<string> {
 }
 
 // 简单的数据库客户端（直接使用 pg）
-async function createAdminUser(email: string, passwordHash: string | null) {
+async function createAdminUser(
+  email: string, 
+  passwordHash: string | null,
+  role: 'admin' | 'photographer' | 'retoucher' | 'guest' = 'admin'
+) {
   const { Client } = await import('pg')
   
   const client = new Client({
@@ -56,7 +78,7 @@ async function createAdminUser(email: string, passwordHash: string | null) {
   try {
     // 检查用户是否已存在
     const checkResult = await client.query(
-      'SELECT id, email FROM users WHERE email = $1',
+      'SELECT id, email FROM users WHERE email = $1 AND deleted_at IS NULL',
       [email.toLowerCase()]
     )
     
@@ -75,7 +97,8 @@ async function createAdminUser(email: string, passwordHash: string | null) {
           [passwordHash, email.toLowerCase()]
         )
         
-        console.log('✅ 管理员密码已更新')
+        const roleName = role === 'admin' ? '管理员' : role === 'photographer' ? '摄影师' : role === 'retoucher' ? '修图师' : '访客'
+        console.log(`✅ ${roleName}密码已更新`)
         console.log(`   邮箱: ${email}`)
       } else {
         console.log('⚠️  用户已存在（密码未设置，首次登录时设置）')
@@ -90,15 +113,17 @@ async function createAdminUser(email: string, passwordHash: string | null) {
       `INSERT INTO users (email, password_hash, role, is_active, created_at, updated_at)
        VALUES ($1, $2, $3, $4, NOW(), NOW())
        RETURNING id, email`,
-      [email.toLowerCase(), passwordHash, 'admin', true]
+      [email.toLowerCase(), passwordHash, role, true]
     )
     
     if (result.rows.length === 0) {
       throw new Error('创建用户失败：未返回数据')
     }
     
-    console.log('✅ 管理员账户创建成功！')
+    const roleName = role === 'admin' ? '管理员' : role === 'photographer' ? '摄影师' : role === 'retoucher' ? '修图师' : '访客'
+    console.log(`✅ ${roleName}账户创建成功！`)
     console.log(`   邮箱: ${email}`)
+    console.log(`   角色: ${role}`)
     console.log(`   ID: ${result.rows[0].id}`)
     console.log('')
     if (passwordHash) {
@@ -119,8 +144,9 @@ async function createAdminUser(email: string, passwordHash: string | null) {
 
 async function createAdmin() {
   // 从命令行参数或提示输入
-  const email = process.argv[2] || await prompt('请输入管理员邮箱: ')
+  const email = process.argv[2] || await prompt('请输入用户邮箱: ')
   const password = process.argv[3] || await promptPassword('请输入密码（留空表示首次登录时设置）: ')
+  const roleArg = process.argv[4] || await prompt('请输入角色 (admin/photographer/retoucher/guest，默认 admin): ')
   
   if (!email) {
     console.error('❌ 邮箱不能为空')
@@ -131,6 +157,16 @@ async function createAdmin() {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   if (!emailRegex.test(email)) {
     console.error('❌ 邮箱格式不正确')
+    process.exit(1)
+  }
+  
+  // 验证角色
+  const validRoles: Array<'admin' | 'photographer' | 'retoucher' | 'guest'> = ['admin', 'photographer', 'retoucher', 'guest']
+  const role = (roleArg && roleArg.trim() ? roleArg.trim().toLowerCase() : 'admin') as 'admin' | 'photographer' | 'retoucher' | 'guest'
+  
+  if (!validRoles.includes(role)) {
+    console.error(`❌ 无效的角色: ${role}`)
+    console.error(`   支持的角色: ${validRoles.join(', ')}`)
     process.exit(1)
   }
   
@@ -154,12 +190,12 @@ async function createAdmin() {
       console.log('🔐 正在哈希密码...')
       passwordHash = await hashPassword(password)
     } else {
-      console.log('📝 将创建密码为空的管理员账户（首次登录时设置）')
+      console.log('📝 将创建密码为空的用户账户（首次登录时设置）')
     }
     
-    // 创建管理员账户
-    console.log('👤 正在创建管理员账户...')
-    await createAdminUser(email, passwordHash)
+    // 创建用户账户
+    console.log(`👤 正在创建${role === 'admin' ? '管理员' : role === 'photographer' ? '摄影师' : role === 'retoucher' ? '修图师' : '访客'}账户...`)
+    await createAdminUser(email, passwordHash, role)
     
   } catch (error) {
     console.error('❌ 发生错误:', error instanceof Error ? error.message : String(error))

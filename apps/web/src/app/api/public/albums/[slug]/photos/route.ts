@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/database'
 import { albumSlugSchema } from '@/lib/validation/schemas'
-import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
+import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 
 interface RouteParams {
   params: Promise<{ slug: string }>

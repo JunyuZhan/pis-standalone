@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
       .from('album_templates')
       .select('*')
       .order('created_at', { ascending: false })
+      .execute()
 
     if (result.error) {
       return handleError(result.error, '查询模板列表失败')

@@ -48,14 +48,14 @@ describe('POST /api/admin/albums/[id]/reprocess', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/reprocess',
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/reprocess',
         {
           method: 'POST',
         }
       )
 
       const response = await POST(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 

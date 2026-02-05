@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/database'
-import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { requireRetoucherOrAdmin } from '@/lib/auth/role-helpers'
 import { uploadPhotoSchema } from '@/lib/validation/schemas'
 import { safeValidate, handleError, ApiError } from '@/lib/validation/error-handler'
 import { getInternalApiUrl } from '@/lib/utils'
@@ -14,9 +14,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const paramsData = await params
   const photoId = paramsData.id
   
-  // 1. 验证用户权限
-  const user = await getCurrentUser(request)
-  if (!user) return ApiError.unauthorized('请先登录')
+  // 1. 验证用户权限：只允许管理员或修图师上传精修图
+  const user = await requireRetoucherOrAdmin(request)
+  if (!user) {
+    return ApiError.forbidden('需要管理员或修图师权限才能上传精修图')
+  }
   
   // 2. 验证照片存在
   const adminClient = await createAdminClient()
@@ -83,7 +85,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       photoId: photo.id,
       albumId: photo.album_id
     })
-  } catch (err) {
+  } catch {
     return ApiError.internal('Failed to generate upload URL')
   }
 }

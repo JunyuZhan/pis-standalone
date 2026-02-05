@@ -99,7 +99,7 @@ describe('Album Session Management', () => {
 
   describe('getSessionCookieOptions', () => {
     it('should return secure options for production', () => {
-      process.env.NODE_ENV = 'production'
+      vi.stubEnv('NODE_ENV', 'production')
       const options = getSessionCookieOptions()
       
       expect(options.httpOnly).toBe(true)
@@ -110,7 +110,7 @@ describe('Album Session Management', () => {
     })
 
     it('should return non-secure options for development', () => {
-      process.env.NODE_ENV = 'development'
+      vi.stubEnv('NODE_ENV', 'development')
       const options = getSessionCookieOptions()
       
       expect(options.httpOnly).toBe(true)

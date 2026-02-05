@@ -2,10 +2,16 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { Camera, Images, Settings, LogOut, Home, Brush } from 'lucide-react'
-import { LanguageSwitcher } from '@/components/ui/language-switcher'
+import dynamic from 'next/dynamic'
+import { Camera, Images, Settings, LogOut, Home, Brush, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AuthUser } from '@/lib/auth'
+
+// 动态导入 LanguageSwitcher，禁用 SSR 以避免 hydration 错误
+const LanguageSwitcher = dynamic(
+  () => import('@/components/ui/language-switcher').then(mod => ({ default: mod.LanguageSwitcher })),
+  { ssr: false }
+)
 
 interface AdminSidebarProps {
   user: AuthUser
@@ -14,6 +20,7 @@ interface AdminSidebarProps {
 const navItems = [
   { href: '/admin', label: '相册管理', icon: Images },
   { href: '/admin/retouch', label: '修图工作台', icon: Brush },
+  { href: '/admin/users', label: '用户管理', icon: Users },
   { href: '/admin/settings', label: '系统设置', icon: Settings },
 ]
 
@@ -69,6 +76,8 @@ export function SidebarContent({ user }: { user: AuthUser }) {
           const isActive =
             item.href === '/admin'
               ? pathname === '/admin' || pathname.startsWith('/admin/albums')
+              : item.href === '/admin/users'
+              ? pathname.startsWith('/admin/users')
               : pathname.startsWith(item.href)
 
           return (

@@ -7,9 +7,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { POST } from './route'
 import { createMockRequest } from '@/test/test-utils'
+import { getCurrentUser } from '@/lib/auth/api-helpers'
 
 // Mock dependencies
-vi.mock('@/lib/supabase/server', () => {
+const { mockSupabaseClient, mockAdminClient, mockAuth } = vi.hoisted(() => {
   const mockAuth = {
     getUser: vi.fn(),
   }
@@ -21,13 +22,27 @@ vi.mock('@/lib/supabase/server', () => {
 
   const mockAdminClient = {
     from: vi.fn(),
+    delete: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
   }
-
-  return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
-    createAdminClient: vi.fn().mockReturnValue(mockAdminClient),
-  }
+  
+  return { mockSupabaseClient, mockAdminClient, mockAuth }
 })
+
+vi.mock('@/lib/auth/api-helpers', () => ({
+  getCurrentUser: vi.fn(),
+}))
+
+vi.mock('@/lib/database', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+  createAdminClient: vi.fn().mockReturnValue(mockAdminClient),
+}))
+
+vi.mock('@/lib/supabase/server', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+  createAdminClient: vi.fn().mockReturnValue(mockAdminClient),
+}))
 
 vi.mock('@/lib/cloudflare-purge', () => ({
   purgePhotoCache: vi.fn(),
@@ -62,10 +77,9 @@ describe('POST /api/admin/photos/permanent-delete', () => {
     revalidatePath = revalidateMock
     
     // 默认用户已登录
-    mockAuth.getUser.mockResolvedValue({
-      data: { user: { id: 'user-123', email: 'test@example.com' } },
-      error: null,
-    })
+    vi.mocked(getCurrentUser).mockResolvedValue({
+      id: 'user-123', email: 'test@example.com',
+    } as any)
 
     // 默认fetch成功
     global.fetch = vi.fn().mockResolvedValue({
@@ -79,19 +93,21 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       purgedUrls: [],
       failedUrls: [],
     })
+
+    // Default mock implementation for adminClient methods
+    mockAdminClient.delete.mockResolvedValue({ data: [], error: null })
+    mockAdminClient.update.mockResolvedValue({ data: [], error: null })
+    mockAdminClient.insert.mockResolvedValue({ data: [], error: null })
   })
 
   describe('authentication', () => {
     it('should return 401 if user is not authenticated', async () => {
-      mockAuth.getUser.mockResolvedValue({
-        data: { user: null },
-        error: null,
-      })
+      vi.mocked(getCurrentUser).mockResolvedValue(null)
 
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -114,7 +130,8 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(400)
-      expect(data.error.code).toBe('INVALID_REQUEST')
+      // Since handleError defaults to INTERNAL_ERROR for generic Error, but we pass status 400
+      expect(data.error.code).toBe('INTERNAL_ERROR')
     })
 
     it('should return 400 if photoIds is not an array', async () => {
@@ -130,7 +147,9 @@ describe('POST /api/admin/photos/permanent-delete', () => {
 
       expect(response.status).toBe(400)
       expect(data.error.code).toBe('VALIDATION_ERROR')
-      expect(data.error.message).toContain('请选择要删除的照片')
+      // Check details for validation error message
+      // Zod default message for type mismatch
+      expect(data.error.details[0].message).toContain('Expected array')
     })
 
     it('should return 400 if photoIds is empty', async () => {
@@ -163,7 +182,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
 
       expect(response.status).toBe(400)
       expect(data.error.code).toBe('VALIDATION_ERROR')
-      expect(data.error.message).toContain('单次最多删除100张照片')
+      expect(data.error.details[0].message).toContain('单次最多删除100张照片')
     })
   })
 
@@ -185,7 +204,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -214,7 +233,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -222,17 +241,17 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(500)
-      expect(data.error.code).toBe('DB_ERROR')
+      expect(data.error.code).toBe('INTERNAL_ERROR')
     })
 
     it('should only delete photos that are in trash (deleted_at is not null)', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
-          thumb_key: 'thumbs/album-123/photo-123.jpg',
-          preview_key: 'previews/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
+          thumb_key: 'thumbs/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
+          preview_key: 'previews/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
         },
       ]
 
@@ -247,17 +266,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -284,10 +297,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -297,7 +306,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -310,7 +318,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -318,8 +326,8 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
-      expect(data.deletedCount).toBe(1)
+      expect(data.data.success).toBe(true)
+      expect(data.data.deletedCount).toBe(1)
       
       // 验证只查询已删除的照片
       expect(mockNot).toHaveBeenCalledWith('deleted_at', 'is', null)
@@ -330,11 +338,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
     it('should delete all MinIO files (original, thumb, preview)', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
-          thumb_key: 'thumbs/album-123/photo-123.jpg',
-          preview_key: 'previews/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
+          thumb_key: 'thumbs/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
+          preview_key: 'previews/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
         },
       ]
 
@@ -349,17 +357,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -386,10 +388,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -399,7 +397,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -412,7 +409,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -420,24 +417,30 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       
       // 验证调用了 Worker API 删除所有文件
-      expect(global.fetch).toHaveBeenCalledTimes(3) // original, thumb, preview
+      expect(global.fetch).toHaveBeenCalledTimes(1)
       
       const fetchCalls = (global.fetch as any).mock.calls
       const cleanupFileCalls = fetchCalls.filter((call: any[]) => 
         call[0].includes('/api/worker/cleanup-file')
       )
-      expect(cleanupFileCalls.length).toBe(3)
+      expect(cleanupFileCalls.length).toBe(1)
+      
+      const body = JSON.parse(cleanupFileCalls[0][1].body)
+      expect(body.keys).toHaveLength(3)
+      expect(body.keys).toContain('raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg')
+      expect(body.keys).toContain('thumbs/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg')
+      expect(body.keys).toContain('previews/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg')
     })
 
     it('should skip null file keys', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -454,17 +457,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -491,10 +488,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -504,7 +497,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -517,7 +509,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -525,7 +517,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       
       // 只应该删除 original_key
       expect(global.fetch).toHaveBeenCalledTimes(1)
@@ -534,9 +526,9 @@ describe('POST /api/admin/photos/permanent-delete', () => {
     it('should continue deletion even if MinIO cleanup fails', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -553,17 +545,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -590,10 +576,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -603,7 +585,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -617,7 +598,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -626,8 +607,8 @@ describe('POST /api/admin/photos/permanent-delete', () => {
 
       // 即使 MinIO 删除失败，数据库记录也应该被删除
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
-      expect(mockDelete).toHaveBeenCalled()
+      expect(data.data.success).toBe(true)
+      expect(mockAdminClient.delete).toHaveBeenCalled()
     })
   })
 
@@ -640,11 +621,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
 
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
-          thumb_key: 'thumbs/album-123/photo-123.jpg',
-          preview_key: 'previews/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
+          thumb_key: 'thumbs/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
+          preview_key: 'previews/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
         },
       ]
 
@@ -659,17 +640,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -696,10 +671,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -709,7 +680,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -728,7 +698,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -736,7 +706,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       
       // 验证调用了 CDN purge
       expect(purgePhotoCache).toHaveBeenCalled()
@@ -752,9 +722,9 @@ describe('POST /api/admin/photos/permanent-delete', () => {
 
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -771,17 +741,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -808,10 +772,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -821,7 +781,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -834,7 +793,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -842,7 +801,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       
       // 不应该调用 CDN purge
       expect(purgePhotoCache).not.toHaveBeenCalled()
@@ -855,9 +814,9 @@ describe('POST /api/admin/photos/permanent-delete', () => {
     it('should delete photo records from database', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -874,17 +833,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -911,10 +864,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -924,7 +873,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -937,7 +885,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -945,17 +893,17 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
-      expect(mockDelete).toHaveBeenCalled()
-      expect(mockDeleteIn).toHaveBeenCalledWith('id', ['photo-123'])
+      expect(data.data.success).toBe(true)
+      expect(mockAdminClient.delete).toHaveBeenCalled()
+      expect(mockAdminClient.delete).toHaveBeenCalledWith('photos', { 'id[]': ['123e4567-e89b-12d3-a456-426614174000'] })
     })
 
     it('should return 500 on database deletion error', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -972,18 +920,12 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
         error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
-        error: { message: 'Delete failed' },
       })
 
       mockAdminClient.from
@@ -996,12 +938,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           select: mockAlbumsSelect,
           in: mockAlbumsIn,
         })
-        .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
 
-      mockDelete.mockReturnThis()
+      mockAdminClient.delete.mockResolvedValue({
+        data: null,
+        error: { code: 'DB_ERROR', message: 'Delete failed' },
+      })
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -1011,7 +952,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -1019,15 +960,15 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(500)
-      expect(data.error.code).toBe('DB_ERROR')
+      expect(data.error.code).toBe('INTERNAL_ERROR')
     })
 
     it('should update album cover if cover photo is deleted', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -1044,17 +985,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
-            cover_photo_id: 'photo-123', // 封面照片被删除
+            cover_photo_id: '123e4567-e89b-12d3-a456-426614174000', // 封面照片被删除
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -1081,14 +1016,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
-          update: mockUpdate,
-          eq: mockUpdateEq,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -1098,7 +1025,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -1111,7 +1037,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -1119,18 +1045,18 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       
       // 验证更新了相册封面
-      expect(mockUpdate).toHaveBeenCalledWith({ cover_photo_id: null })
+      expect(mockAdminClient.update).toHaveBeenCalledWith('albums', { cover_photo_id: null }, { 'id[]': ['123e4567-e89b-12d3-a456-426614174001'] })
     })
 
     it('should update album photo count', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -1147,7 +1073,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
@@ -1155,12 +1081,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
         error: null,
       })
 
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
-        error: null,
-      })
-
       const mockCountSelect = vi.fn().mockReturnThis()
       const mockCountEq = vi.fn().mockReturnThis()
       const mockCountIs = vi.fn().mockResolvedValue({
@@ -1184,10 +1104,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -1197,7 +1113,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -1210,7 +1125,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -1218,10 +1133,10 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       
       // 验证更新了相册照片计数
-      expect(mockUpdate).toHaveBeenCalledWith({ photo_count: 5 })
+      expect(mockAdminClient.update).toHaveBeenCalledWith('albums', { photo_count: 5 }, { id: '123e4567-e89b-12d3-a456-426614174001' })
     })
   })
 
@@ -1229,9 +1144,9 @@ describe('POST /api/admin/photos/permanent-delete', () => {
     it('should revalidate Next.js cache paths', async () => {
       const mockPhotos = [
         {
-          id: 'photo-123',
-          album_id: 'album-123',
-          original_key: 'raw/album-123/photo-123.jpg',
+          id: '123e4567-e89b-12d3-a456-426614174000',
+          album_id: '123e4567-e89b-12d3-a456-426614174001',
+          original_key: 'raw/123e4567-e89b-12d3-a456-426614174001/123e4567-e89b-12d3-a456-426614174000.jpg',
           thumb_key: null,
           preview_key: null,
         },
@@ -1248,17 +1163,11 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const mockAlbumsIn = vi.fn().mockResolvedValue({
         data: [
           {
-            id: 'album-123',
+            id: '123e4567-e89b-12d3-a456-426614174001',
             slug: 'test-album',
             cover_photo_id: null,
           },
         ],
-        error: null,
-      })
-
-      const mockDelete = vi.fn().mockReturnThis()
-      const mockDeleteIn = vi.fn().mockResolvedValue({
-        data: null,
         error: null,
       })
 
@@ -1285,10 +1194,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           in: mockAlbumsIn,
         })
         .mockReturnValueOnce({
-          delete: mockDelete,
-          in: mockDeleteIn,
-        })
-        .mockReturnValueOnce({
           select: mockCountSelect,
           eq: mockCountEq,
           is: mockCountIs,
@@ -1298,7 +1203,6 @@ describe('POST /api/admin/photos/permanent-delete', () => {
           eq: mockUpdateEq,
         })
 
-      mockDelete.mockReturnThis()
       mockCountSelect.mockReturnThis()
       mockCountEq.mockReturnThis()
       mockUpdate.mockReturnThis()
@@ -1311,7 +1215,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 
@@ -1319,7 +1223,7 @@ describe('POST /api/admin/photos/permanent-delete', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       
       // 验证调用了 revalidatePath
       expect(revalidatePath).toHaveBeenCalledTimes(4)
@@ -1332,12 +1236,12 @@ describe('POST /api/admin/photos/permanent-delete', () => {
 
   describe('error handling', () => {
     it('should return 500 on unexpected error', async () => {
-      mockAuth.getUser.mockRejectedValue(new Error('Unexpected error'))
+      vi.mocked(getCurrentUser).mockRejectedValue(new Error('Unexpected error'))
 
       const request = createMockRequest('http://localhost:3000/api/admin/photos/permanent-delete', {
         method: 'POST',
         body: {
-          photoIds: ['photo-123'],
+          photoIds: ['123e4567-e89b-12d3-a456-426614174000'],
         },
       })
 

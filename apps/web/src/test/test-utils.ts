@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { vi } from 'vitest'
 
 /**
@@ -11,9 +11,10 @@ export function createMockRequest(
     headers?: Record<string, string>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     body?: any
+    cookies?: Record<string, string>
   } = {}
 ): NextRequest {
-  const { method = 'GET', headers = {}, body } = options
+  const { method = 'GET', headers = {}, body, cookies = {} } = options
 
   const requestInit: {
     method?: string
@@ -40,6 +41,72 @@ export function createMockRequest(
     headers: requestInit.headers,
     body: requestInit.body,
   })
+}
+
+/**
+ * 创建带有认证 cookie 的 mock NextRequest
+ * 
+ * @param url - 请求 URL
+ * @param userId - 用户 ID
+ * @param email - 用户邮箱
+ * @param options - 其他选项
+ */
+export function createAuthenticatedRequest(
+  url: string,
+  userId: string,
+  email: string,
+  options: {
+    method?: string
+    headers?: Record<string, string>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    body?: any
+    cookieName?: string
+    cookieValue?: string
+  } = {}
+): NextRequest {
+  // 使用测试密钥生成 token（确保与测试环境一致）
+  const jwtSecret = new TextEncoder().encode(
+    process.env.AUTH_JWT_SECRET || 'test-secret-key-minimum-32-characters-long!'
+  )
+  
+  // 创建 mock token（这里简化处理，实际需要 jose 库生成）
+  // 测试中我们直接设置 cookie 值，由 mock 的 verifyToken 处理
+  const { method = 'POST', headers = {}, body, cookieName = 'pis-auth-token', cookieValue } = options
+
+  const requestInit: {
+    method: string
+    headers: Headers
+    body?: string
+  } = {
+    method,
+    headers: new Headers(headers),
+  }
+
+  if (body) {
+    requestInit.body = typeof body === 'string' ? body : JSON.stringify(body)
+    if (!headers['Content-Type']) {
+      requestInit.headers = new Headers({
+        ...headers,
+        'Content-Type': 'application/json',
+      })
+    }
+  }
+
+  // 创建 request，然后设置 cookie
+  const request = new NextRequest(url, {
+    method: requestInit.method,
+    headers: requestInit.headers,
+    body: requestInit.body,
+  })
+
+  // 设置认证 cookie
+  if (cookieValue) {
+    // 使用 Headers 方法设置 cookie
+    const currentCookies = request.headers.get('cookie') || ''
+    request.headers.set('cookie', `${cookieName}=${cookieValue}; ${currentCookies}`)
+  }
+
+  return request
 }
 
 /**

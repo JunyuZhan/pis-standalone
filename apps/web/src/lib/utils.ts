@@ -54,8 +54,8 @@ export function formatDate(date: string | Date): string {
   const year = d.getFullYear()
   const month = d.getMonth() + 1
   const day = d.getDate()
-  const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月']
-  return `${year}年${monthNames[month - 1]}${day}日`
+  if (month < 1 || month > 12) return ''
+  return `${year}年${month}月${day}日`
 }
 
 /**
@@ -170,8 +170,8 @@ export function getInternalApiUrl(path: string): string {
  * - 开发环境：如果配置了 localhost:8080 但实际运行在 3000 端口，自动转换为相对路径
  * @returns {string} 安全的媒体 URL
  */
-export function getSafeMediaUrl(): string {
-  const mediaUrl = process.env.NEXT_PUBLIC_MEDIA_URL || ''
+export function getSafeMediaUrl(url?: string): string {
+  const mediaUrl = url || process.env.NEXT_PUBLIC_MEDIA_URL || ''
   
   // 如果媒体 URL 为空，使用相对路径
   if (!mediaUrl) {
@@ -290,4 +290,100 @@ export function generateAlbumSlug(): string {
   const timestamp = Date.now().toString(36)
   const randomPart = Math.random().toString(36).substring(2, 8)
   return `${timestamp}${randomPart}`
+}
+
+/**
+ * 截断文本
+ * 
+ * @param {string} text 文本内容
+ * @param {number} maxLength 最大长度
+ * @returns {string} 截断后的文本
+ */
+export function truncateText(text: string, maxLength: number): string {
+  if (!text) return ''
+  if (text.length <= maxLength) return text
+  return text.slice(0, maxLength) + '...'
+}
+
+/**
+ * 生成安全的随机令牌（用于 upload_token）
+ *
+ * @description 使用 crypto.randomBytes 生成安全的随机字符串
+ * @param {number} [length=48] 令牌长度（字节数，默认 48，生成 64 字符的十六进制字符串）
+ * @returns {string} 随机令牌字符串（十六进制格式）
+ *
+ * @example
+ * ```typescript
+ * const token = generateUploadToken()
+ * // 返回类似 "a1b2c3d4e5f6..." 的 64 字符字符串
+ * ```
+ */
+export function generateUploadToken(length: number = 48): string {
+  // 服务端：使用 Node.js crypto 模块
+  if (typeof window === 'undefined' && typeof require !== 'undefined') {
+    try {
+      const crypto = require('crypto')
+      return crypto.randomBytes(length).toString('hex')
+    } catch {
+      // 如果 require 失败，回退到其他方法
+    }
+  }
+
+  // 客户端或服务端回退方案：使用 Web Crypto API
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const array = new Uint8Array(length)
+    crypto.getRandomValues(array)
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('')
+  }
+
+  // 最后的回退方案：使用 Math.random（不够安全，但总比没有好）
+  const chars = '0123456789abcdef'
+  let result = ''
+  for (let i = 0; i < length * 2; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)]
+  }
+  return result
+}
+
+/**
+ * 获取 FTP 服务器地址
+ *
+ * @description 从环境变量或配置中获取 FTP 服务器地址
+ * @returns {string} FTP 服务器地址（IP 或域名）
+ *
+ * @example
+ * ```typescript
+ * const ftpHost = getFtpServerHost()
+ * // 返回类似 "192.168.1.100" 或 "ftp.example.com"
+ * ```
+ */
+export function getFtpServerHost(): string {
+  // 优先使用环境变量
+  if (process.env.FTP_HOST) {
+    return process.env.FTP_HOST
+  }
+
+  // 客户端：尝试从 window.location 获取
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname
+    // 如果是 localhost，返回提示信息
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'localhost'
+    }
+    return hostname
+  }
+
+  // 服务端：使用默认值或从环境变量获取
+  return process.env.NEXT_PUBLIC_APP_URL?.replace(/^https?:\/\//, '').split(':')[0] || 'localhost'
+}
+
+/**
+ * 获取 FTP 服务器端口
+ *
+ * @description 从环境变量获取 FTP 端口，默认 21
+ * @returns {number} FTP 端口号
+ */
+export function getFtpServerPort(): number {
+  const port = process.env.FTP_PORT || process.env.NEXT_PUBLIC_FTP_PORT || '21'
+  return parseInt(port, 10) || 21
 }

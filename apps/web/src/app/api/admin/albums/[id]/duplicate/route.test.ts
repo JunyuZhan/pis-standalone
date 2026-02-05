@@ -19,6 +19,7 @@ vi.mock('@/lib/auth/api-helpers', () => ({
 
 vi.mock('@/lib/utils', () => ({
   getAlbumShareUrl: vi.fn((slug: string) => `https://example.com/album/${slug}`),
+  generateAlbumSlug: vi.fn(() => 'new-slug'),
 }))
 
 describe('POST /api/admin/albums/[id]/duplicate', () => {
@@ -47,14 +48,14 @@ describe('POST /api/admin/albums/[id]/duplicate', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/duplicate',
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/duplicate',
         {
           method: 'POST',
         }
       )
 
       const response = await POST(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 
@@ -145,10 +146,10 @@ describe('POST /api/admin/albums/[id]/duplicate', () => {
       }
 
       const newAlbum = {
+        ...originalAlbum,
         id: 'new-album-id',
         slug: 'original-album-fu-ben',
         title: 'Original Album (副本)',
-        ...originalAlbum,
         photo_count: 0,
         selected_count: 0,
         view_count: 0,

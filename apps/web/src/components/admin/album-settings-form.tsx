@@ -2,13 +2,13 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Save, Eye, EyeOff, Lock, Calendar, Download, Radio, Share2, Brush, Sparkles } from 'lucide-react'
+import { Loader2, Save, Eye, EyeOff, Lock, Calendar, Download, Radio, Share2, Brush, Sparkles, Copy, Check, RefreshCw, Server } from 'lucide-react'
 import type { Database } from '@/types/database'
 import { MultiWatermarkManager, type WatermarkItem } from './multi-watermark-manager'
 import { StylePresetSelector } from './style-preset-selector'
 import { StorageChecker } from './storage-checker'
 import { showSuccess, handleApiError } from '@/lib/toast'
-import { getSafeMediaUrl } from '@/lib/utils'
+import { getSafeMediaUrl, getFtpServerHost, getFtpServerPort } from '@/lib/utils'
 
 type Album = Database['public']['Tables']['albums']['Row']
 
@@ -21,6 +21,8 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [copiedToken, setCopiedToken] = useState(false)
+  const [resettingToken, setResettingToken] = useState(false)
   // 使用安全的媒体 URL（自动修复 localhost HTTPS 问题）
   const mediaUrl = getSafeMediaUrl()
   // 获取默认水印配置（用于初始化）
@@ -111,6 +113,7 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
     is_live: album.is_live ?? false,
     // 访问控制
     password: album.password || '',
+    upload_token: album.upload_token || '', // FTP/API 上传令牌
     expires_at: album.expires_at ? new Date(album.expires_at).toISOString().slice(0, 16) : '',
     // 布局设置
     layout: album.layout || 'masonry',
@@ -248,8 +251,11 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
         ? { preset: formData.color_grading } 
         : null
       
+      // 从 formData 中提取需要提交的字段，排除 upload_token（通过重置按钮单独更新）
+      const { upload_token, ...formDataWithoutToken } = formData
+      
       const submitData = {
-        ...formData,
+        ...formDataWithoutToken,
         watermark_enabled: watermarkEnabled,
         event_date: formData.event_date && formData.event_date.trim() ? formData.event_date : null,
         expires_at: formData.expires_at && formData.expires_at.trim() ? formData.expires_at : null,
@@ -427,6 +433,198 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
         </div>
       </section>
 
+      {/* FTP 上传配置 */}
+      <section className="card space-y-6">
+        <h2 className="text-lg font-medium flex items-center gap-2">
+          <Server className="w-5 h-5 text-accent" />
+          FTP 上传配置
+        </h2>
+        <p className="text-sm text-text-secondary">
+          配置相机 FTP 上传功能，支持相机直接上传照片到相册
+        </p>
+
+        {/* FTP 服务器信息 */}
+        <div className="space-y-4 p-4 bg-surface-elevated rounded-lg border border-border">
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              FTP 服务器地址
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={getFtpServerHost()}
+                readOnly
+                className="input flex-1 bg-surface font-mono text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(getFtpServerHost())
+                  showSuccess('服务器地址已复制')
+                }}
+                className="btn-secondary px-3"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              FTP 端口
+            </label>
+            <input
+              type="text"
+              value={getFtpServerPort()}
+              readOnly
+              className="input bg-surface font-mono text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              用户名（二选一）
+            </label>
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs text-text-muted mb-1">方式一：使用相册 ID</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={album.id}
+                    readOnly
+                    className="input flex-1 bg-surface font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(album.id)
+                      showSuccess('相册 ID 已复制')
+                    }}
+                    className="btn-secondary px-3"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-text-muted mb-1">方式二：使用相册短码</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={album.slug}
+                    readOnly
+                    className="input flex-1 bg-surface font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(album.slug)
+                      showSuccess('相册短码已复制')
+                    }}
+                    className="btn-secondary px-3"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1">
+              上传令牌（密码）
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={formData.upload_token || '未生成'}
+                readOnly
+                className="input flex-1 bg-surface font-mono text-xs"
+                placeholder="点击重置按钮生成新令牌"
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!formData.upload_token) return
+                  try {
+                    await navigator.clipboard.writeText(formData.upload_token)
+                    setCopiedToken(true)
+                    showSuccess('上传令牌已复制')
+                    setTimeout(() => setCopiedToken(false), 2000)
+                  } catch (error) {
+                    handleApiError(error, '复制失败')
+                  }
+                }}
+                disabled={!formData.upload_token}
+                className="btn-secondary px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {copiedToken ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!confirm('重置上传令牌后，需要更新相机中的 FTP 配置。确定要重置吗？')) {
+                    return
+                  }
+                  setResettingToken(true)
+                  try {
+                    // 发送空字符串触发重置
+                    const response = await fetch(`/api/admin/albums/${album.id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ upload_token: '' }),
+                    })
+
+                    if (!response.ok) {
+                      const errorData = await response.json().catch(() => ({}))
+                      throw new Error(errorData?.error?.message || '重置失败')
+                    }
+
+                    const result = await response.json()
+                    const newToken = result.data?.upload_token
+                    if (newToken) {
+                      setFormData((prev) => ({ ...prev, upload_token: newToken }))
+                      showSuccess('上传令牌已重置，请更新相机配置')
+                      router.refresh()
+                    }
+                  } catch (error) {
+                    handleApiError(error, '重置令牌失败')
+                  } finally {
+                    setResettingToken(false)
+                  }
+                }}
+                disabled={resettingToken}
+                className="btn-secondary px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {resettingToken ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+            <p className="text-xs text-text-muted mt-1">
+              {formData.upload_token 
+                ? '将此令牌配置到相机的 FTP 设置中作为密码'
+                : '点击重置按钮生成上传令牌'}
+            </p>
+          </div>
+        </div>
+
+        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+          <p className="text-sm text-blue-800 dark:text-blue-200">
+            <strong>配置说明：</strong>
+          </p>
+          <ul className="text-xs text-blue-700 dark:text-blue-300 mt-2 space-y-1 list-disc list-inside">
+            <li>在相机 FTP 设置中填入上述服务器地址和端口</li>
+            <li>用户名可以使用相册 ID 或相册短码（推荐使用短码，更易输入）</li>
+            <li>密码使用上传令牌</li>
+            <li>配置完成后，相机拍摄的照片会自动上传到此相册</li>
+          </ul>
+        </div>
+      </section>
+
       {/* 显示设置 */}
       <section className="card space-y-6">
         <h2 className="text-lg font-medium">显示设置</h2>
@@ -562,7 +760,7 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
               开启人工修图
             </p>
             <p className="text-sm text-text-secondary">
-              开启后，新上传的照片状态将默认为"待修图" (Pending Retouch)，需要修图师处理后才能发布
+              开启后，新上传的照片状态将默认为&quot;待修图&quot; (Pending Retouch)，需要修图师处理后才能发布
             </p>
           </div>
           <button

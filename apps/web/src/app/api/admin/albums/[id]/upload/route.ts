@@ -247,7 +247,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       filename: sanitizedFilename, // 使用清理后的文件名
       file_size: fileSize,
       mime_type: contentType,
-      hash: hash,
+      hash: hash, // hash 字段在 schema 中已定义
       status: 'pending',
     })
 
@@ -313,6 +313,31 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         }
         
         const errorMsg = fetchError instanceof Error ? fetchError.message : '无法连接到 Worker 服务'
+        
+        // 检查是否是连接错误
+        if (errorMsg.includes('ECONNREFUSED') || errorMsg.includes('fetch failed') || errorMsg.includes('ECONNRESET')) {
+          try {
+            await adminClient.delete('photos', { id: photoId })
+          } catch (cleanupError) {
+            console.error('[Upload API] Failed to cleanup photo record:', cleanupError)
+          }
+          
+          return NextResponse.json(
+            {
+              error: {
+                code: 'WORKER_UNAVAILABLE',
+                message: 'Worker 服务不可用',
+                details: '无法连接到 Worker 服务。请确保 Worker 服务正在运行（运行 `pnpm dev:worker` 启动 Worker 服务）。',
+              },
+              photoId, // 包含 photoId，让前端知道需要清理
+            },
+            {
+              status: 503,
+              headers: response.headers,
+            }
+          )
+        }
+        
         return NextResponse.json(
           { 
             error: { 

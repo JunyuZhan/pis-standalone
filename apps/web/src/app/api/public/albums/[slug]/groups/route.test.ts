@@ -9,18 +9,20 @@ import { GET } from './route'
 import { createMockRequest } from '@/test/test-utils'
 
 // Mock dependencies
-vi.mock('@/lib/database', () => {
-  const mockSupabaseClient = {
+const { mockSupabaseClientRef } = vi.hoisted(() => {
+  const mockClient = {
     from: vi.fn(),
   }
-
   return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+    mockSupabaseClientRef: { current: mockClient },
   }
 })
 
+vi.mock('@/lib/database', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClientRef.current),
+}))
+
 describe('GET /api/public/albums/[slug]/groups', () => {
-  let mockSupabaseClient: any
 
   const validAlbumId = '550e8400-e29b-41d4-a716-446655440000'
   const validGroupId1 = '550e8400-e29b-41d4-a716-446655440001'
@@ -32,8 +34,8 @@ describe('GET /api/public/albums/[slug]/groups', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     
-    const { createClient } = await import('@/lib/database')
-    mockSupabaseClient = await createClient()
+    // Reset the mock client
+    mockSupabaseClientRef.current.from = vi.fn()
   })
 
   describe('album validation', () => {
@@ -47,7 +49,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
           error: { message: 'Not found' },
         }),
       }
-      mockSupabaseClient.from.mockReturnValue(mockChain)
+      mockSupabaseClientRef.current.from.mockReturnValue(mockChain)
 
       const request = createMockRequest('http://localhost:3000/api/public/albums/test-slug/groups')
       const response = await GET(request, { params: Promise.resolve({ slug: 'test-slug' }) })
@@ -73,7 +75,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
           error: null,
         }),
       }
-      mockSupabaseClient.from.mockReturnValue(mockChain)
+      mockSupabaseClientRef.current.from.mockReturnValue(mockChain)
 
       const request = createMockRequest('http://localhost:3000/api/public/albums/test-slug/groups')
       const response = await GET(request, { params: Promise.resolve({ slug: 'test-slug' }) })
@@ -99,7 +101,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
           error: null,
         }),
       }
-      mockSupabaseClient.from.mockReturnValue(mockChain)
+      mockSupabaseClientRef.current.from.mockReturnValue(mockChain)
 
       const request = createMockRequest('http://localhost:3000/api/public/albums/test-slug/groups')
       const response = await GET(request, { params: Promise.resolve({ slug: 'test-slug' }) })
@@ -128,7 +130,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
           error: null,
         }),
       }
-      mockSupabaseClient.from.mockReturnValue(mockChain)
+      mockSupabaseClientRef.current.from.mockReturnValue(mockChain)
 
       const request = createMockRequest('http://localhost:3000/api/public/albums/test-slug/groups')
       const response = await GET(request, { params: Promise.resolve({ slug: 'test-slug' }) })
@@ -174,7 +176,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
       ]
 
       // Setup mocks based on table name
-      mockSupabaseClient.from.mockImplementation((table: string) => {
+      mockSupabaseClientRef.current.from.mockImplementation((table: string) => {
         if (table === 'albums') {
           return {
             select: vi.fn().mockReturnThis(),
@@ -238,7 +240,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
       // @ts-ignore
       mockAssignmentsChain.then = (resolve: (value: unknown) => void) => resolve({ data: mockAssignments, error: null })
 
-      mockSupabaseClient.from.mockImplementation((table: string) => {
+      mockSupabaseClientRef.current.from.mockImplementation((table: string) => {
         if (table === 'albums') return {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
@@ -321,7 +323,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
       // @ts-ignore
       mockAssignmentsChain.then = (resolve: (value: unknown) => void) => resolve({ data: mockAssignments, error: null })
 
-      mockSupabaseClient.from.mockImplementation((table: string) => {
+      mockSupabaseClientRef.current.from.mockImplementation((table: string) => {
         if (table === 'albums') return {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
@@ -359,7 +361,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
       // @ts-ignore
       mockGroupsChain.then = (resolve: (value: unknown) => void) => resolve({ data: [], error: null })
 
-      mockSupabaseClient.from.mockImplementation((table: string) => {
+      mockSupabaseClientRef.current.from.mockImplementation((table: string) => {
         if (table === 'albums') return {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),
@@ -405,7 +407,7 @@ describe('GET /api/public/albums/[slug]/groups', () => {
       // @ts-ignore
       mockGroupsChain.then = (resolve: (value: unknown) => void) => resolve({ data: null, error: { message: 'Database error' } })
 
-      mockSupabaseClient.from.mockImplementation((table: string) => {
+      mockSupabaseClientRef.current.from.mockImplementation((table: string) => {
         if (table === 'albums') return {
           select: vi.fn().mockReturnThis(),
           eq: vi.fn().mockReturnThis(),

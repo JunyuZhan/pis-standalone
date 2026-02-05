@@ -31,6 +31,7 @@ export interface Database {
           is_public: boolean
           // 访问控制
           password: string | null
+          upload_token: string | null  // FTP/API 上传令牌
           expires_at: string | null
           // 布局设置
           layout: 'masonry' | 'grid' | 'carousel'
@@ -81,6 +82,7 @@ export interface Database {
           cover_photo_id?: string | null
           is_public?: boolean
           password?: string | null
+          upload_token?: string | null  // FTP/API 上传令牌（可选，创建时自动生成）
           expires_at?: string | null
           layout?: 'masonry' | 'grid' | 'carousel'
           sort_rule?: 'capture_desc' | 'capture_asc' | 'manual'
@@ -118,6 +120,7 @@ export interface Database {
           cover_photo_id?: string | null
           is_public?: boolean
           password?: string | null
+          upload_token?: string | null  // FTP/API 上传令牌（可选，用于重置）
           expires_at?: string | null
           layout?: 'masonry' | 'grid' | 'carousel'
           sort_rule?: 'capture_desc' | 'capture_asc' | 'manual'

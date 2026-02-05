@@ -54,7 +54,7 @@ describe('POST /api/admin/albums/[id]/package', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/package',
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/package',
         {
           method: 'POST',
           body: {
@@ -64,7 +64,7 @@ describe('POST /api/admin/albums/[id]/package', () => {
       )
 
       const response = await POST(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 
@@ -361,11 +361,11 @@ describe('GET /api/admin/albums/[id]/package', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/package?packageId=package-123'
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/package?packageId=550e8400-e29b-41d4-a716-446655440001'
       )
 
       const response = await GET(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 

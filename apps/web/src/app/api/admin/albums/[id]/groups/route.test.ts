@@ -44,11 +44,11 @@ describe('GET /api/admin/albums/[id]/groups', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/groups'
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/groups'
       )
 
       const response = await GET(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 
@@ -83,8 +83,11 @@ describe('GET /api/admin/albums/[id]/groups', () => {
         { id: 'group-1', name: 'Group 1', album_id: albumId },
         { id: 'group-2', name: 'Group 2', album_id: albumId },
       ]
-      const assignments1 = [{ photo_id: 'photo-1' }, { photo_id: 'photo-2' }]
-      const assignments2 = [{ photo_id: 'photo-3' }]
+      const assignments = [
+        { group_id: 'group-1' },
+        { group_id: 'group-1' },
+        { group_id: 'group-2' },
+      ]
 
       // Mock album exists
       const mockSelectAlbum = vi.fn().mockReturnThis()
@@ -98,23 +101,13 @@ describe('GET /api/admin/albums/[id]/groups', () => {
       // Mock groups query
       const mockSelectGroups = vi.fn().mockReturnThis()
       const mockEqGroups = vi.fn().mockReturnThis()
-      const mockOrderGroups = vi.fn().mockResolvedValue({
-        data: groups,
-        error: null,
-      })
-
-      // Mock assignments queries
-      const mockSelectAssignments1 = vi.fn().mockReturnThis()
-      const mockEqAssignments1 = vi.fn().mockResolvedValue({
-        data: assignments1,
-        count: 2,
-        error: null,
-      })
-
-      const mockSelectAssignments2 = vi.fn().mockReturnThis()
-      const mockEqAssignments2 = vi.fn().mockResolvedValue({
-        data: assignments2,
-        count: 1,
+      const mockOrderGroups = vi.fn().mockReturnThis()
+      
+      // Mock assignments query
+      const mockSelectAssignments = vi.fn().mockReturnThis()
+      const mockInAssignments = vi.fn().mockReturnThis()
+      const mockExecuteAssignments = vi.fn().mockResolvedValue({
+        data: assignments,
         error: null,
       })
 
@@ -129,14 +122,12 @@ describe('GET /api/admin/albums/[id]/groups', () => {
           select: mockSelectGroups,
           eq: mockEqGroups,
           order: mockOrderGroups,
+          then: (resolve: any) => resolve({ data: groups, error: null }),
         })
         .mockReturnValueOnce({
-          select: mockSelectAssignments1,
-          eq: mockEqAssignments1,
-        })
-        .mockReturnValueOnce({
-          select: mockSelectAssignments2,
-          eq: mockEqAssignments2,
+          select: mockSelectAssignments,
+          in: mockInAssignments,
+          execute: mockExecuteAssignments,
         })
 
       const request = createMockRequest(
@@ -217,7 +208,7 @@ describe('POST /api/admin/albums/[id]/groups', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/groups',
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/groups',
         {
           method: 'POST',
           body: {
@@ -227,7 +218,7 @@ describe('POST /api/admin/albums/[id]/groups', () => {
       )
 
       const response = await POST(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 
@@ -259,6 +250,22 @@ describe('POST /api/admin/albums/[id]/groups', () => {
 
     it('should return 400 for empty name', async () => {
       const albumId = '550e8400-e29b-41d4-a716-446655440000'
+
+      // Mock album exists
+      const mockSelectAlbum = vi.fn().mockReturnThis()
+      const mockEqAlbum = vi.fn().mockReturnThis()
+      const mockIsAlbum = vi.fn().mockReturnThis()
+      const mockSingleAlbum = vi.fn().mockResolvedValue({
+        data: { id: albumId },
+        error: null,
+      })
+
+      mockDb.from.mockReturnValue({
+        select: mockSelectAlbum,
+        eq: mockEqAlbum,
+        is: mockIsAlbum,
+        single: mockSingleAlbum,
+      })
 
       const request = createMockRequest(
         `http://localhost:3000/api/admin/albums/${albumId}/groups`,

@@ -46,20 +46,76 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       headers['cookie'] = cookieHeader
     }
     
-    const workerRes = await fetch(proxyUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ albumId }),
-    })
+    let workerRes: Response
+    try {
+      workerRes = await fetch(proxyUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ albumId }),
+      })
+    } catch (fetchError) {
+      const errorMsg = fetchError instanceof Error ? fetchError.message : '无法连接到 Worker 服务'
+      console.error('[Check Pending API] Fetch error:', fetchError)
+      
+      // 检查是否是连接错误
+      if (errorMsg.includes('ECONNREFUSED') || errorMsg.includes('fetch failed') || errorMsg.includes('ECONNRESET')) {
+        return NextResponse.json(
+          {
+            error: {
+              code: 'WORKER_UNAVAILABLE',
+              message: 'Worker 服务不可用',
+              details: '无法连接到 Worker 服务。请确保 Worker 服务正在运行（运行 `pnpm dev:worker` 启动 Worker 服务）。',
+            },
+          },
+          { status: 503 }
+        )
+      }
+      
+      return ApiError.internal(`调用 Worker 服务失败: ${errorMsg}`)
+    }
     
     if (!workerRes.ok) {
-      const errorText = await workerRes.text()
-      return ApiError.internal(`Worker 服务错误: ${errorText}`)
+      let errorText = ''
+      let errorData: { error?: string | { code?: string; message?: string; details?: string }; details?: string } = {}
+      
+      try {
+        errorText = await workerRes.text()
+        try {
+          errorData = JSON.parse(errorText)
+        } catch {
+          errorData = { error: errorText }
+        }
+      } catch {
+        errorText = `HTTP ${workerRes.status} ${workerRes.statusText}`
+      }
+      
+      // 处理嵌套的错误对象
+      const errorMessage = typeof errorData.error === 'string'
+        ? errorData.error
+        : (errorData.error && typeof errorData.error === 'object' ? errorData.error.message : null) || 'Worker 服务错误'
+      const errorCode = typeof errorData.error === 'string'
+        ? 'WORKER_ERROR'
+        : (errorData.error && typeof errorData.error === 'object' ? errorData.error.code : null) || 'WORKER_ERROR'
+      const errorDetails = (typeof errorData.error === 'object' && errorData.error && 'details' in errorData.error
+        ? errorData.error.details
+        : null) || errorData.details || errorText
+      
+      return NextResponse.json(
+        {
+          error: {
+            code: errorCode,
+            message: errorMessage,
+            details: errorDetails,
+          },
+        },
+        { status: workerRes.status >= 400 && workerRes.status < 600 ? workerRes.status : 500 }
+      )
     }
     
     const result = await workerRes.json()
     return NextResponse.json(result)
   } catch (error) {
+    console.error('[Check Pending API] Unhandled error:', error)
     return handleError(error, '检查待处理照片失败')
   }
 }

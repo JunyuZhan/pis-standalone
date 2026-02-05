@@ -83,9 +83,9 @@ describe('i18n', () => {
 
       const mockDispatchEvent = vi.fn()
       // 即使设置了 window，服务端环境也会提前返回
-      global.window = {
+      vi.stubGlobal('window', {
         dispatchEvent: mockDispatchEvent,
-      } as unknown as Window
+      })
 
       setLocaleCookie('en')
       // 注意：setLocaleCookie 会检查 typeof window === 'undefined'，所以即使设置了 window 对象，如果类型检查失败也会提前返回
@@ -103,12 +103,15 @@ describe('i18n', () => {
         configurable: true,
       })
 
-      global.window = {
+      vi.stubGlobal('window', {
+        location: {
+          pathname: '/en/album/123'
+        },
         dispatchEvent: mockDispatchEvent,
         CustomEvent: class CustomEvent {
           constructor(public type: string, public options?: { detail?: { locale: string } }) {}
         },
-      } as unknown as Window
+      })
 
       setLocaleCookie('en')
 

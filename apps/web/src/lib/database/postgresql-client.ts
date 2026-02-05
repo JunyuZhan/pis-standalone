@@ -35,9 +35,71 @@
  */
 import { Pool } from 'pg'
 import type { DatabaseFilters, DatabaseValue, QueryParameterValue, RpcParams } from './types'
+import { config } from 'dotenv'
+import { resolve } from 'path'
+
+// 手动加载环境变量（确保在 monorepo 结构中正确加载项目根目录的 .env.local）
+// Next.js 通常会自动加载，但在某些情况下（如 Turbopack 模式）可能不会加载
+if (typeof process !== 'undefined' && process.env) {
+  // 只在环境变量未设置时尝试加载（避免重复加载）
+  if (!process.env.DATABASE_PASSWORD && !process.env.POSTGRES_PASSWORD && !process.env.DATABASE_URL) {
+    try {
+      const cwd = process.cwd()
+      // 尝试多个可能的路径
+      const possiblePaths = [
+        resolve(cwd, '../../.env.local'), // 从 apps/web 向上到项目根目录
+        resolve(cwd, '../../../.env.local'), // 从 apps/web/.next 向上到项目根目录
+        resolve(cwd, '.env.local'), // 当前目录
+        resolve(cwd, '../.env.local'), // 上一级目录
+      ]
+      
+      let loaded = false
+      for (const envPath of possiblePaths) {
+        try {
+          const result = config({ path: envPath })
+          if (!result.error) {
+            // 检查是否成功加载了环境变量
+            if (process.env.DATABASE_PASSWORD || process.env.POSTGRES_PASSWORD || process.env.DATABASE_URL) {
+              if (process.env.NODE_ENV === 'development') {
+                console.log('[PostgreSQL] Successfully loaded .env.local from:', envPath)
+              }
+              loaded = true
+              break
+            }
+          }
+        } catch {
+          // 继续尝试下一个路径
+          continue
+        }
+      }
+      
+      if (!loaded && process.env.NODE_ENV === 'development') {
+        console.warn('[PostgreSQL] Could not find .env.local in any of these paths:', possiblePaths)
+        console.warn('[PostgreSQL] Current working directory:', cwd)
+      }
+    } catch (error) {
+      // 忽略加载错误（可能文件不存在，Next.js 会处理）
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[PostgreSQL] Failed to load .env.local manually:', error instanceof Error ? error.message : String(error))
+      }
+    }
+  }
+}
 
 /** 全局连接池（单例模式） */
 let pool: Pool | null = null
+
+/**
+ * 重置连接池（用于环境变量更新后重新创建连接）
+ */
+export function resetPool(): void {
+  if (pool) {
+    pool.end().catch((err) => {
+      console.error('Error closing pool:', err)
+    })
+    pool = null
+  }
+}
 
 function isTruthyEnv(value?: string): boolean {
   if (!value) return false
@@ -78,16 +140,55 @@ function getPool(): Pool {
       const port = parseInt(process.env.DATABASE_PORT || process.env.POSTGRES_PORT || '5432', 10)
       const database = process.env.DATABASE_NAME || process.env.POSTGRES_DB || 'pis'
       const user = process.env.DATABASE_USER || process.env.POSTGRES_USER || 'pis'
-      // 优先使用 DATABASE_PASSWORD，如果未设置则使用 POSTGRES_PASSWORD，最后默认为空
-      const password = process.env.DATABASE_PASSWORD || process.env.POSTGRES_PASSWORD || ''
+      // 优先使用 DATABASE_PASSWORD，如果未设置则使用 POSTGRES_PASSWORD
+      // 确保密码始终是字符串类型（不能是 undefined 或 null）
+      const passwordRaw = process.env.DATABASE_PASSWORD || process.env.POSTGRES_PASSWORD
+      const password = passwordRaw != null ? String(passwordRaw) : ''
       const ssl = enableSsl
+      
+      // 验证必需的连接参数
+      if (!host || !database || !user) {
+        throw new Error('Missing required database configuration: DATABASE_HOST, DATABASE_NAME, and DATABASE_USER are required')
+      }
+      
+      // 验证密码是否设置（PostgreSQL SCRAM 认证需要密码）
+      if (!password || password.length === 0) {
+        const errorMsg = 'DATABASE_PASSWORD or POSTGRES_PASSWORD environment variable is required but not set. ' +
+          'Please check your .env.local file or environment configuration. ' +
+          'Make sure to restart the Next.js dev server after updating .env.local.'
+        console.error('[PostgreSQL]', errorMsg)
+        console.error('[PostgreSQL] Available env vars:', {
+          DATABASE_PASSWORD: process.env.DATABASE_PASSWORD ? `SET (length: ${process.env.DATABASE_PASSWORD.length})` : 'NOT SET',
+          POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD ? `SET (length: ${process.env.POSTGRES_PASSWORD.length})` : 'NOT SET',
+          DATABASE_URL: process.env.DATABASE_URL ? 'SET' : 'NOT SET',
+          NODE_ENV: process.env.NODE_ENV,
+          // 列出所有 DATABASE_ 相关的环境变量（不显示值）
+          allDatabaseEnvVars: Object.keys(process.env).filter(key => 
+            key.startsWith('DATABASE_') || key.startsWith('POSTGRES_')
+          ),
+        })
+        throw new Error(errorMsg)
+      }
+      
+      // 调试日志（仅在开发环境）
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[PostgreSQL] Connection config:', {
+          host,
+          port,
+          database,
+          user,
+          passwordSet: !!passwordRaw,
+          passwordLength: password.length,
+          ssl,
+        })
+      }
       
       pool = new Pool({
         host,
         port,
         database,
         user,
-        password,
+        password, // PostgreSQL 要求密码必须是字符串类型
         ssl: ssl ? { rejectUnauthorized: false } : false,
         max: 20, // 连接池最大连接数
         idleTimeoutMillis: 30000,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/database'
 import { getCurrentUser } from '@/lib/auth/api-helpers'
-import { getAlbumShareUrl, generateAlbumSlug, getAppBaseUrl } from '@/lib/utils'
+import { getAlbumShareUrl, generateAlbumSlug, getAppBaseUrl, generateUploadToken } from '@/lib/utils'
 import type { AlbumInsert, Json } from '@/types/database'
 import { createAlbumSchema } from '@/lib/validation/schemas'
 import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
@@ -168,7 +168,7 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json()
     } catch {
-      return handleError(new Error('请求格式错误'), '请求体格式错误，请提供有效的JSON')
+      return ApiError.badRequest('请求体格式错误，请提供有效的JSON')
     }
 
     // 验证输入
@@ -196,6 +196,7 @@ export async function POST(request: NextRequest) {
       watermark_config,
       color_grading,
       password,
+      upload_token,
       expires_at,
       expiresAt,
     } = validation.data
@@ -208,6 +209,9 @@ export async function POST(request: NextRequest) {
     // 生成唯一的 slug
     const slug = generateAlbumSlug()
 
+    // 如果没有提供 upload_token，自动生成一个
+    const finalUploadToken = upload_token?.trim() || generateUploadToken()
+
     // 构建插入数据
     const insertData: AlbumInsert = {
       title: title.trim(),
@@ -218,6 +222,7 @@ export async function POST(request: NextRequest) {
       poster_image_url: poster_image_url || null,
       is_public: finalIsPublic,
       password: password?.trim() || null,
+      upload_token: finalUploadToken, // 自动生成或使用提供的令牌
       expires_at: finalExpiresAt,
       layout: layout || 'masonry',
       sort_rule: sort_rule || 'capture_desc',
@@ -238,7 +243,7 @@ export async function POST(request: NextRequest) {
       // 处理唯一约束冲突（slug 重复）
       const errorMessage = result.error.message || ''
       if (errorMessage.includes('23505') || errorMessage.includes('unique constraint') || errorMessage.includes('duplicate key')) {
-        return ApiError.validation('相册创建失败，请重试（可能是 slug 重复）')
+        return ApiError.conflict('相册创建失败，请重试（可能是 slug 重复）')
       }
       return handleError(result.error, '创建相册失败')
     }
@@ -262,12 +267,13 @@ export async function POST(request: NextRequest) {
       shareUrl = `${appUrl}/album/${encodeURIComponent(data.slug || '')}`
     }
 
-    // 返回创建结果
+    // 返回创建结果（包含 upload_token 用于 FTP 配置）
     return createSuccessResponse({
       id: data.id,
       slug: data.slug,
       title: data.title,
       is_public: data.is_public,
+      upload_token: (data as any).upload_token || finalUploadToken, // 返回生成的令牌
       shareUrl,
     })
   } catch (error) {

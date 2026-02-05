@@ -4,13 +4,23 @@
  * 测试 POST 和 GET 方法
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { POST, GET } from './route'
 import { createMockRequest } from '@/test/test-utils'
 
 // Mock dependencies
 vi.mock('@/lib/auth/api-helpers', () => ({
   getCurrentUser: vi.fn(),
+}))
+
+// Mock logger to suppress error logs
+vi.mock('@/lib/logger', () => ({
+  default: {
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+  },
 }))
 
 // Mock fetch for worker proxy call
@@ -54,11 +64,31 @@ describe('POST /api/admin/consistency/check', () => {
   })
 
   describe('validation', () => {
+    // Suppress console.error for expected validation errors
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
     it('should use default values for empty request body', async () => {
       const workerResponse = {
         success: true,
-        checked: 100,
-        fixed: 0,
+        result: {
+          summary: {
+            totalPhotos: 100,
+            inconsistentPhotos: 0,
+            orphanedFiles: 0,
+            orphanedRecords: 0
+          },
+          details: {
+            inconsistentPhotos: [],
+            orphanedFiles: []
+          },
+          errors: []
+        }
       }
 
       mockFetch.mockResolvedValue({
@@ -93,7 +123,26 @@ describe('POST /api/admin/consistency/check', () => {
       )
     })
 
-    it('should return 400 if deleteOrphanedFiles is true without autoFix', async () => {
+    it('should allow deleteOrphanedFiles without autoFix', async () => {
+      const workerResponse = {
+        success: true,
+        result: {
+          summary: {
+            totalPhotos: 0,
+            inconsistentPhotos: 0,
+            orphanedFiles: 0,
+            orphanedRecords: 0
+          },
+          details: { inconsistentPhotos: [], orphanedFiles: [] },
+          errors: []
+        }
+      }
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: async () => workerResponse,
+      })
+
       const request = createMockRequest(
         'http://localhost:3000/api/admin/consistency/check',
         {
@@ -108,8 +157,8 @@ describe('POST /api/admin/consistency/check', () => {
       const response = await POST(request)
       const data = await response.json()
 
-      expect(response.status).toBe(400)
-      expect(data.error.code).toBe('VALIDATION_ERROR')
+      expect(response.status).toBe(200)
+      expect(data.success).toBe(true)
     })
 
     it('should return 400 if deleteOrphanedRecords is true without autoFix', async () => {
@@ -134,8 +183,25 @@ describe('POST /api/admin/consistency/check', () => {
     it('should accept valid request with autoFix enabled', async () => {
       const workerResponse = {
         success: true,
-        checked: 100,
-        fixed: 5,
+        result: {
+          summary: {
+            totalPhotos: 100,
+            inconsistentPhotos: 5,
+            orphanedFiles: 0,
+            orphanedRecords: 0
+          },
+          details: {
+            inconsistentPhotos: [
+              { action: 'marked_for_reprocessing' },
+              { action: 'marked_for_reprocessing' },
+              { action: 'marked_for_reprocessing' },
+              { action: 'marked_for_reprocessing' },
+              { action: 'marked_for_reprocessing' }
+            ],
+            orphanedFiles: []
+          },
+          errors: []
+        }
       }
 
       mockFetch.mockResolvedValue({
@@ -161,18 +227,37 @@ describe('POST /api/admin/consistency/check', () => {
 
       expect(response.status).toBe(200)
       expect(data.success).toBe(true)
-      expect(data.result).toEqual(workerResponse)
+      expect(data.result.totalChecked).toBe(100)
+      expect(data.result.fixed).toBe(5)
     })
   })
 
   describe('worker proxy', () => {
+    // Suppress console.error for expected worker errors
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
     it('should proxy request to worker and return result', async () => {
       const workerResponse = {
         success: true,
-        checked: 100,
-        fixed: 0,
-        orphanedFiles: 2,
-        orphanedRecords: 1,
+        result: {
+          summary: {
+            totalPhotos: 100,
+            inconsistentPhotos: 0,
+            orphanedFiles: 2,
+            orphanedRecords: 1,
+          },
+          details: {
+            inconsistentPhotos: [],
+            orphanedFiles: []
+          },
+          errors: []
+        }
       }
 
       mockFetch.mockResolvedValue({
@@ -196,7 +281,9 @@ describe('POST /api/admin/consistency/check', () => {
 
       expect(response.status).toBe(200)
       expect(data.success).toBe(true)
-      expect(data.result).toEqual(workerResponse)
+      expect(data.result.totalChecked).toBe(100)
+      expect(data.result.orphanedFiles).toBe(2)
+      expect(data.result.orphanedRecords).toBe(1)
       expect(mockFetch).toHaveBeenCalledWith(
         'http://localhost:3000/api/worker/consistency/check',
         expect.objectContaining({

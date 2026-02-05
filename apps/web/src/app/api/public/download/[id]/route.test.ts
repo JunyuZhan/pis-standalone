@@ -8,15 +8,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createMockRequest } from '@/test/test-utils'
 
 // Mock dependencies
-vi.mock('@/lib/supabase/server', () => {
-  const mockSupabaseClient = {
-    from: vi.fn(),
-  }
+const mockDb = {
+  from: vi.fn(),
+}
 
-  return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
-  }
-})
+vi.mock('@/lib/database', () => ({
+  createClient: vi.fn().mockResolvedValue(mockDb),
+}))
 
 // Mock fetch for Worker API calls
 const mockFetch = vi.fn()
@@ -26,9 +24,13 @@ global.fetch = mockFetch
 
 
 describe('GET /api/public/download/[id]', () => {
-  let mockSupabaseClient: any
+  let mockDb: any
   let GET: typeof import('./route').GET
   const originalEnv = process.env
+  
+  // Valid UUIDs for testing
+  const validPhotoId = '123e4567-e89b-12d3-a456-426614174000'
+  const validAlbumId = '123e4567-e89b-12d3-a456-426614174001'
 
   beforeEach(async () => {
     vi.clearAllMocks()
@@ -44,8 +46,8 @@ describe('GET /api/public/download/[id]', () => {
     // Mock global fetch
     global.fetch = mockFetch
     
-    const { createClient } = await import('@/lib/supabase/server')
-    mockSupabaseClient = await createClient()
+    const { createClient } = await import('@/lib/database')
+    mockDb = await createClient()
     
     // 重置 fetch mock
     mockFetch.mockReset()
@@ -74,14 +76,14 @@ describe('GET /api/public/download/[id]', () => {
         error: { message: 'Not found' },
       })
 
-      mockSupabaseClient.from.mockReturnValue({
+      mockDb.from.mockReturnValue({
         select: mockSelect,
         eq: mockEq,
         single: mockSingle,
       })
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(404)
@@ -98,14 +100,14 @@ describe('GET /api/public/download/[id]', () => {
         error: null,
       })
 
-      mockSupabaseClient.from.mockReturnValue({
+      mockDb.from.mockReturnValue({
         select: mockSelect,
         eq: mockEq,
         single: mockSingle,
       })
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(404)
@@ -116,32 +118,38 @@ describe('GET /api/public/download/[id]', () => {
   describe('album validation', () => {
     it('should return 404 if album is deleted', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        id: validPhotoId,
+        original_key: `raw/${validAlbumId}/${validPhotoId}.jpg`,
         filename: 'photo.jpg',
-        album_id: 'album-123',
-        albums: {
-          id: 'album-123',
-          allow_download: true,
-          deleted_at: '2024-01-01T00:00:00Z',
-        },
+        album_id: validAlbumId,
+      }
+      
+      const mockAlbum = {
+        id: validAlbumId,
+        allow_download: true,
+        deleted_at: '2024-01-01T00:00:00Z',
       }
 
-      const mockSelect = vi.fn().mockReturnThis()
-      const mockEq = vi.fn().mockReturnThis()
-      const mockSingle = vi.fn().mockResolvedValue({
-        data: mockPhoto,
-        error: null,
-      })
+      // Mock first query (photos)
+      const mockPhotoQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockPhoto, error: null }),
+      }
 
-      mockSupabaseClient.from.mockReturnValue({
-        select: mockSelect,
-        eq: mockEq,
-        single: mockSingle,
-      })
+      // Mock second query (albums)
+      const mockAlbumQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockAlbum, error: null }),
+      }
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      mockDb.from
+        .mockReturnValueOnce(mockPhotoQuery)
+        .mockReturnValueOnce(mockAlbumQuery)
+
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(404)
@@ -151,32 +159,38 @@ describe('GET /api/public/download/[id]', () => {
 
     it('should return 403 if album does not allow download', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        id: validPhotoId,
+        original_key: `raw/${validAlbumId}/${validPhotoId}.jpg`,
         filename: 'photo.jpg',
-        album_id: 'album-123',
-        albums: {
-          id: 'album-123',
-          allow_download: false,
-          deleted_at: null,
-        },
+        album_id: validAlbumId,
       }
 
-      const mockSelect = vi.fn().mockReturnThis()
-      const mockEq = vi.fn().mockReturnThis()
-      const mockSingle = vi.fn().mockResolvedValue({
-        data: mockPhoto,
-        error: null,
-      })
+      const mockAlbum = {
+        id: validAlbumId,
+        allow_download: false,
+        deleted_at: null,
+      }
 
-      mockSupabaseClient.from.mockReturnValue({
-        select: mockSelect,
-        eq: mockEq,
-        single: mockSingle,
-      })
+      // Mock first query (photos)
+      const mockPhotoQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockPhoto, error: null }),
+      }
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      // Mock second query (albums)
+      const mockAlbumQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockAlbum, error: null }),
+      }
+
+      mockDb.from
+        .mockReturnValueOnce(mockPhotoQuery)
+        .mockReturnValueOnce(mockAlbumQuery)
+
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(403)
@@ -188,29 +202,35 @@ describe('GET /api/public/download/[id]', () => {
   describe('presigned URL generation', () => {
     it('should generate presigned URL successfully', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        id: validPhotoId,
+        original_key: `raw/${validAlbumId}/${validPhotoId}.jpg`,
         filename: 'photo.jpg',
-        album_id: 'album-123',
-        albums: {
-          id: 'album-123',
-          allow_download: true,
-          deleted_at: null,
-        },
+        album_id: validAlbumId,
       }
 
-      const mockSelect = vi.fn().mockReturnThis()
-      const mockEq = vi.fn().mockReturnThis()
-      const mockSingle = vi.fn().mockResolvedValue({
-        data: mockPhoto,
-        error: null,
-      })
+      const mockAlbum = {
+        id: validAlbumId,
+        allow_download: true,
+        deleted_at: null,
+      }
 
-      mockSupabaseClient.from.mockReturnValue({
-        select: mockSelect,
-        eq: mockEq,
-        single: mockSingle,
-      })
+      // Mock first query (photos)
+      const mockPhotoQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockPhoto, error: null }),
+      }
+
+      // Mock second query (albums)
+      const mockAlbumQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockAlbum, error: null }),
+      }
+
+      mockDb.from
+        .mockReturnValueOnce(mockPhotoQuery)
+        .mockReturnValueOnce(mockAlbumQuery)
 
       const mockDownloadUrl = 'https://minio.example.com/presigned-url'
       mockFetch.mockResolvedValue({
@@ -218,14 +238,14 @@ describe('GET /api/public/download/[id]', () => {
         json: async () => ({ url: mockDownloadUrl }),
       })
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.downloadUrl).toBe(mockDownloadUrl)
-      expect(data.filename).toBe('photo.jpg')
-      expect(data.expiresIn).toBe(300) // 5 minutes
+      expect(data.data.downloadUrl).toBe(mockDownloadUrl)
+      expect(data.data.filename).toBe('photo.jpg')
+      expect(data.data.expiresIn).toBe(300) // 5 minutes
       
       // 验证 Worker API 被调用
       expect(mockFetch).toHaveBeenCalledWith(
@@ -241,29 +261,35 @@ describe('GET /api/public/download/[id]', () => {
 
     it('should return download URL with correct format', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        id: validPhotoId,
+        original_key: `raw/${validAlbumId}/${validPhotoId}.jpg`,
         filename: '照片 测试.jpg', // 包含中文字符和空格
-        album_id: 'album-123',
-        albums: {
-          id: 'album-123',
-          allow_download: true,
-          deleted_at: null,
-        },
+        album_id: validAlbumId,
       }
 
-      const mockSelect = vi.fn().mockReturnThis()
-      const mockEq = vi.fn().mockReturnThis()
-      const mockSingle = vi.fn().mockResolvedValue({
-        data: mockPhoto,
-        error: null,
-      })
+      const mockAlbum = {
+        id: validAlbumId,
+        allow_download: true,
+        deleted_at: null,
+      }
 
-      mockSupabaseClient.from.mockReturnValue({
-        select: mockSelect,
-        eq: mockEq,
-        single: mockSingle,
-      })
+      // Mock first query (photos)
+      const mockPhotoQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockPhoto, error: null }),
+      }
+
+      // Mock second query (albums)
+      const mockAlbumQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockAlbum, error: null }),
+      }
+
+      mockDb.from
+        .mockReturnValueOnce(mockPhotoQuery)
+        .mockReturnValueOnce(mockAlbumQuery)
 
       const mockDownloadUrl = 'https://minio.example.com/presigned-url'
       mockFetch.mockResolvedValue({
@@ -271,20 +297,20 @@ describe('GET /api/public/download/[id]', () => {
         json: async () => ({ url: mockDownloadUrl }),
       })
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.downloadUrl).toBe(mockDownloadUrl)
-      expect(data.filename).toBe('照片 测试.jpg')
-      expect(data.expiresIn).toBe(300)
+      expect(data.data.downloadUrl).toBe(mockDownloadUrl)
+      expect(data.data.filename).toBe('照片 测试.jpg')
+      expect(data.data.expiresIn).toBe(300)
     })
   })
 
   describe('error handling', () => {
     it('should return 500 on params error', async () => {
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
       const response = await GET(request, { params: Promise.reject(new Error('Invalid params')) })
       const data = await response.json()
 
@@ -294,29 +320,35 @@ describe('GET /api/public/download/[id]', () => {
 
     it('should return 500 on MinIO error', async () => {
       const mockPhoto = {
-        id: 'photo-123',
-        original_key: 'raw/album-123/photo-123.jpg',
+        id: validPhotoId,
+        original_key: `raw/${validAlbumId}/${validPhotoId}.jpg`,
         filename: 'photo.jpg',
-        album_id: 'album-123',
-        albums: {
-          id: 'album-123',
-          allow_download: true,
-          deleted_at: null,
-        },
+        album_id: validAlbumId,
       }
 
-      const mockSelect = vi.fn().mockReturnThis()
-      const mockEq = vi.fn().mockReturnThis()
-      const mockSingle = vi.fn().mockResolvedValue({
-        data: mockPhoto,
-        error: null,
-      })
+      const mockAlbum = {
+        id: validAlbumId,
+        allow_download: true,
+        deleted_at: null,
+      }
 
-      mockSupabaseClient.from.mockReturnValue({
-        select: mockSelect,
-        eq: mockEq,
-        single: mockSingle,
-      })
+      // Mock first query (photos)
+      const mockPhotoQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockPhoto, error: null }),
+      }
+
+      // Mock second query (albums)
+      const mockAlbumQuery = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: mockAlbum, error: null }),
+      }
+
+      mockDb.from
+        .mockReturnValueOnce(mockPhotoQuery)
+        .mockReturnValueOnce(mockAlbumQuery)
 
       // Mock Worker API 返回错误
       mockFetch.mockResolvedValue({
@@ -325,12 +357,13 @@ describe('GET /api/public/download/[id]', () => {
         text: async () => 'Worker API error',
       })
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(500)
-      expect(data.error.code).toBe('WORKER_ERROR')
+      expect(data.error.code).toBe('INTERNAL_ERROR')
+      expect(data.error.message).toContain('Worker API error')
     })
 
     it('should return 500 on database error', async () => {
@@ -338,14 +371,14 @@ describe('GET /api/public/download/[id]', () => {
       const mockEq = vi.fn().mockReturnThis()
       const mockSingle = vi.fn().mockRejectedValue(new Error('Database error'))
 
-      mockSupabaseClient.from.mockReturnValue({
+      mockDb.from.mockReturnValue({
         select: mockSelect,
         eq: mockEq,
         single: mockSingle,
       })
 
-      const request = createMockRequest('http://localhost:3000/api/public/download/photo-123')
-      const response = await GET(request, { params: Promise.resolve({ id: 'photo-123' }) })
+      const request = createMockRequest(`http://localhost:3000/api/public/download/${validPhotoId}`)
+      const response = await GET(request, { params: Promise.resolve({ id: validPhotoId }) })
       const data = await response.json()
 
       expect(response.status).toBe(500)

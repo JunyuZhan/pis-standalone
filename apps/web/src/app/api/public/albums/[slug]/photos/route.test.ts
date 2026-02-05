@@ -9,16 +9,18 @@ import { GET } from './route'
 import { createMockRequest } from '@/test/test-utils'
 
 // Mock dependencies
-vi.mock('@/lib/database', () => {
-  const mockSupabaseClient = {
-    from: vi.fn(),
-  }
-
+const { mockSupabaseClient } = vi.hoisted(() => {
   return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
-    createAdminClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+    mockSupabaseClient: {
+      from: vi.fn(),
+    }
   }
 })
+
+vi.mock('@/lib/database', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+  createAdminClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+}))
 
 describe('GET /api/public/albums/[slug]/photos', () => {
   let mockSupabaseClient: any

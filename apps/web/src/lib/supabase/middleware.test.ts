@@ -51,7 +51,7 @@ describe('supabase/middleware', () => {
       vi.mocked(mockClient.auth.getUser).mockResolvedValue({
         data: { user: null },
         error: null,
-      })
+      } as any)
 
       const request = createMockRequest('http://localhost:3000/admin/login')
       const response = await updateSession(request)
@@ -69,9 +69,9 @@ describe('supabase/middleware', () => {
         },
       } as any)
       vi.mocked(mockClient.auth.getUser).mockResolvedValue({
-        data: { user: { id: 'user-1' } },
+        data: { user: { id: 'user-1' } as any },
         error: null,
-      })
+      } as any)
 
       const request = createMockRequest('http://localhost:3000/admin/login')
       const response = await updateSession(request)
@@ -91,7 +91,7 @@ describe('supabase/middleware', () => {
       vi.mocked(mockClient.auth.getUser).mockResolvedValue({
         data: { user: null },
         error: null,
-      })
+      } as any)
 
       const request = createMockRequest('http://localhost:3000/admin')
       const response = await updateSession(request)
@@ -109,9 +109,9 @@ describe('supabase/middleware', () => {
         },
       } as any)
       vi.mocked(mockClient.auth.getUser).mockResolvedValue({
-        data: { user: { id: 'user-1' } },
+        data: { user: { id: 'user-1' } as any },
         error: null,
-      })
+      } as any)
 
       const request = createMockRequest('http://localhost:3000/admin')
       const response = await updateSession(request)
@@ -131,7 +131,7 @@ describe('supabase/middleware', () => {
       vi.mocked(mockClient.auth.getUser).mockResolvedValue({
         data: { user: null },
         error: null,
-      })
+      } as any)
 
       const request = createMockRequest('http://localhost:3000/album/test')
       const response = await updateSession(request)

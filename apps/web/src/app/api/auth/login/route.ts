@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
 import { checkRateLimit } from '@/middleware-rate-limit'
 import { 
-  createSession, 
   getAuthDatabase 
 } from '@/lib/auth'
+import { createAccessToken, createRefreshToken, COOKIE_NAME, REFRESH_COOKIE_NAME } from '@/lib/auth/jwt'
 import { verifyPassword } from '@/lib/auth/password'
 import { initAuthDatabase } from '@/lib/auth/database'
 import { loginSchema } from '@/lib/validation/schemas'
-import { safeValidate, handleError, createSuccessResponse } from '@/lib/validation/error-handler'
+import { safeValidate, handleError } from '@/lib/validation/error-handler'
 
 // 初始化认证数据库（如果尚未初始化）
 try {
@@ -300,10 +301,59 @@ export async function POST(request: NextRequest) {
       }
 
       // 登录成功，创建会话
-      const session = await createSession({
-        id: user.id,
-        email: user.email,
+      // 使用 cookies().set() 设置 cookie，它会自动添加到响应中
+      const accessToken = await createAccessToken({ id: user.id, email: user.email })
+      const refreshToken = await createRefreshToken({ id: user.id, email: user.email })
+      
+      // 使用 cookies() API 设置 cookie（这会自动添加到响应中）
+      const cookieStore = await cookies()
+      const isProduction = process.env.NODE_ENV === 'production'
+      
+      // 设置访问令牌 cookie
+      cookieStore.set(COOKIE_NAME, accessToken, {
+        httpOnly: true,
+        secure: isProduction, // 开发环境不使用 secure，避免 localhost 无法设置 cookie
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60, // 1 小时
       })
+
+      // 设置刷新令牌 cookie
+      cookieStore.set(REFRESH_COOKIE_NAME, refreshToken, {
+        httpOnly: true,
+        secure: isProduction, // 开发环境不使用 secure，避免 localhost 无法设置 cookie
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 7, // 7 天
+      })
+
+      // 调试日志（仅在开发环境）
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Login] Cookies set via cookies().set():', {
+          accessTokenSet: !!accessToken,
+          refreshTokenSet: !!refreshToken,
+          accessTokenLength: accessToken.length,
+          refreshTokenLength: refreshToken.length,
+          secure: isProduction,
+          sameSite: 'lax',
+          path: '/',
+        })
+      }
+
+      // 创建响应对象（cookie 已通过 cookies().set() 设置，会自动包含在响应中）
+      const response = NextResponse.json(
+        {
+          success: true,
+          data: {
+            success: true,
+            user: {
+              id: user.id,
+              email: user.email,
+            },
+          },
+        },
+        { status: 200 }
+      )
 
       // 更新最后登录时间（异步，不阻塞响应）
       if ('updateLastLogin' in authDb && typeof authDb.updateLastLogin === 'function') {
@@ -312,17 +362,7 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      // 会话 cookies 已由 createSession 设置
-      return createSuccessResponse(
-        {
-          success: true,
-          user: {
-            id: session.user.id,
-            email: session.user.email,
-          },
-        },
-        200
-      )
+      return response
     } catch (error) {
       // 数据库错误或其他内部错误
       console.error('Login error:', error)

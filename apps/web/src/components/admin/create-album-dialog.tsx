@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Copy, Check, ChevronDown, ChevronUp, Download } from 'lucide-react'
+import { Loader2, Copy, Check, ChevronDown, ChevronUp, Download, Server } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/dialog'
 import type { AlbumTemplate } from '@/types/database'
 import { StylePresetSelector } from './style-preset-selector'
+import { getFtpServerHost, getFtpServerPort } from '@/lib/utils'
+import { showSuccess } from '@/lib/toast'
 
 interface CreateAlbumDialogProps {
   open: boolean
@@ -37,7 +39,9 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
     id: string
     slug: string
     shareUrl: string
+    upload_token?: string
   } | null>(null)
+  const [showFtpConfig, setShowFtpConfig] = useState(false)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -414,6 +418,125 @@ export function CreateAlbumDialog({ open, onOpenChange }: CreateAlbumDialogProps
                     )}
                   </button>
                 </div>
+              </div>
+
+              {/* FTP 配置（可折叠） */}
+              <div className="border border-border rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowFtpConfig(!showFtpConfig)}
+                  className="w-full flex items-center justify-between p-4 hover:bg-surface-elevated transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Server className="w-5 h-5 text-accent" />
+                    <span className="font-medium">FTP 上传配置</span>
+                  </div>
+                  {showFtpConfig ? (
+                    <ChevronUp className="w-4 h-4 text-text-muted" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-text-muted" />
+                  )}
+                </button>
+
+                {showFtpConfig && created.upload_token && (
+                  <div className="p-4 space-y-3 bg-surface-elevated border-t border-border">
+                    <p className="text-sm text-text-secondary">
+                      配置相机 FTP 上传功能，支持相机直接上传照片
+                    </p>
+                    
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-xs font-medium text-text-secondary mb-1">
+                          FTP 服务器地址
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={getFtpServerHost()}
+                            readOnly
+                            className="input flex-1 text-xs font-mono bg-surface"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(getFtpServerHost())
+                              showSuccess('服务器地址已复制')
+                            }}
+                            className="btn-secondary px-2"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-text-secondary mb-1">
+                          FTP 端口
+                        </label>
+                        <input
+                          type="text"
+                          value={getFtpServerPort()}
+                          readOnly
+                          className="input text-xs font-mono bg-surface"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-text-secondary mb-1">
+                          用户名（推荐使用短码）
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={created.slug}
+                            readOnly
+                            className="input flex-1 text-xs font-mono bg-surface"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(created.slug)
+                              showSuccess('相册短码已复制')
+                            }}
+                            className="btn-secondary px-2"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-medium text-text-secondary mb-1">
+                          上传令牌（密码）
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={created.upload_token}
+                            readOnly
+                            className="input flex-1 text-xs font-mono bg-surface"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(created.upload_token!)
+                              showSuccess('上传令牌已复制')
+                            }}
+                            className="btn-secondary px-2"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
+                      <p className="text-xs text-blue-800 dark:text-blue-200">
+                        <strong>提示：</strong>在相机 FTP 设置中填入上述信息，拍摄的照片将自动上传到此相册。
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <DialogFooter>

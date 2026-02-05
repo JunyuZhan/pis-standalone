@@ -443,9 +443,10 @@ start_services() {
     info "停止旧容器（如果有）..."
     $COMPOSE_CMD -f "$compose_file" down 2>/dev/null || true
     
-    # 启动服务
+    # 启动服务（优先使用本地镜像）
     info "正在启动 Docker 容器..."
-    if $COMPOSE_CMD -f "$compose_file" up -d; then
+    # 使用 --pull never 优先使用本地镜像，如果镜像不存在会报错，然后可以手动拉取
+    if $COMPOSE_CMD -f "$compose_file" up -d --pull never 2>/dev/null || $COMPOSE_CMD -f "$compose_file" up -d; then
         success "Docker 容器启动成功"
         
         # 等待服务启动

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { createClient } from '@/lib/database'
 import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { generateUploadToken } from '@/lib/utils'
 import type { AlbumUpdate, Json } from '@/types/database'
 import { updateAlbumSchema, albumIdSchema } from '@/lib/validation/schemas'
 import { safeValidate, handleError, createSuccessResponse, ApiError } from '@/lib/validation/error-handler'
@@ -131,7 +132,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     try {
       body = await request.json()
     } catch {
-      return handleError(new Error('请求格式错误'), '请求体格式错误')
+      return handleError(new Error('请求体格式错误'), '请求体格式错误')
     }
 
     // 验证输入（updateAlbumSchema 的所有字段已经是可选的）
@@ -191,6 +192,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (validatedData.password !== undefined) {
       // 密码字段：空字符串转换为 null
       updateData.password = validatedData.password || null
+    }
+    if (validatedData.upload_token !== undefined) {
+      // upload_token 字段：
+      // - 如果提供了新值，使用新值
+      // - 如果是空字符串或 null，生成新的令牌（重置）
+      if (validatedData.upload_token && validatedData.upload_token.trim()) {
+        updateData.upload_token = validatedData.upload_token.trim()
+      } else {
+        // 重置令牌：生成新的随机令牌
+        updateData.upload_token = generateUploadToken()
+      }
     }
     if (validatedData.expires_at !== undefined) {
       // 时间字段：空字符串转换为 null，否则使用 ISO 格式

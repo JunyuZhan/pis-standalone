@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/auth/api-helpers'
+import { requireAdmin } from '@/lib/auth/role-helpers'
 import { ApiError } from '@/lib/validation/error-handler'
-import { createAdminClient } from '@/lib/database'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import { resolve } from 'path'
@@ -25,22 +24,9 @@ const execAsync = promisify(exec)
  */
 export async function GET(request: NextRequest) {
   try {
-    // 验证登录状态和管理员权限
-    const user = await getCurrentUser(request)
-
-    if (!user) {
-      return ApiError.unauthorized('请先登录')
-    }
-
-    // 从数据库查询用户角色
-    const db = await createAdminClient()
-    const { data: userData } = await db
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (!userData || (userData as { role?: string }).role !== 'admin') {
+    // 验证管理员权限
+    const admin = await requireAdmin(request)
+    if (!admin) {
       return ApiError.forbidden('只有管理员可以执行此操作')
     }
 

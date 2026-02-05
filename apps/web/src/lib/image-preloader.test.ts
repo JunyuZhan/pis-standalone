@@ -238,13 +238,13 @@ describe('image-preloader', () => {
 
       // Trigger the callback with intersecting entry
       if (capturedCallback) {
-        capturedCallback([
-          {
-            isIntersecting: true,
-            target: mockImg1,
-          } as IntersectionObserverEntry,
-        ], capturedObserver)
-      }
+          (capturedCallback as any)([
+            {
+              isIntersecting: true,
+              target: mockImg1,
+            } as unknown as IntersectionObserverEntry,
+          ], capturedObserver)
+        }
 
       // Should preload images
       expect(global.document.createElement).toHaveBeenCalled()
@@ -298,11 +298,11 @@ describe('image-preloader', () => {
       preloadVisibleImages(mockContainer, 'img')
 
       if (capturedCallback) {
-        capturedCallback([
+        (capturedCallback as any)([
           {
             isIntersecting: true,
             target: mockImg1,
-          } as IntersectionObserverEntry,
+          } as unknown as IntersectionObserverEntry,
         ], capturedObserver)
       }
 
@@ -341,11 +341,11 @@ describe('image-preloader', () => {
       preloadVisibleImages(mockContainer, 'img')
 
       if (capturedCallback) {
-        capturedCallback([
+        (capturedCallback as any)([
           {
             isIntersecting: true,
             target: mockImg1,
-          } as IntersectionObserverEntry,
+          } as unknown as IntersectionObserverEntry,
         ], capturedObserver)
       }
 
@@ -377,11 +377,11 @@ describe('image-preloader', () => {
       preloadVisibleImages(mockContainer, 'img')
 
       if (capturedCallback) {
-        capturedCallback([
+        (capturedCallback as any)([
           {
             isIntersecting: false,
             target: mockImg1,
-          } as IntersectionObserverEntry,
+          } as unknown as IntersectionObserverEntry,
         ], capturedObserver)
       }
 
@@ -445,11 +445,11 @@ describe('image-preloader', () => {
       preloadVisibleImages(mockContainer, 'img', { preloadCount: 2 })
 
       if (capturedCallback) {
-        capturedCallback([
+        (capturedCallback as any)([
           {
             isIntersecting: true,
             target: mockImg1,
-          } as IntersectionObserverEntry,
+          } as unknown as IntersectionObserverEntry,
         ], capturedObserver)
       }
 

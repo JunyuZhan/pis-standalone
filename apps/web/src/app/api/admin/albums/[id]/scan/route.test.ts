@@ -48,14 +48,14 @@ describe('POST /api/admin/albums/[id]/scan', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/scan',
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/scan',
         {
           method: 'POST',
         }
       )
 
       const response = await POST(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 
@@ -168,7 +168,7 @@ describe('POST /api/admin/albums/[id]/scan', () => {
       expect(response.status).toBe(200)
       expect(data).toEqual(workerResponse)
       expect(mockFetch).toHaveBeenCalledWith(
-        'http://localhost:3000/api/worker/scan',
+        '/api/worker/scan',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({

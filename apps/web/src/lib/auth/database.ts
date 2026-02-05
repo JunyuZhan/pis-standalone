@@ -66,10 +66,12 @@ export class PostgreSQLAuthDatabase implements ExtendedAuthDatabase {
   ): Promise<{ id: string; email: string; password_hash: string | null } | null> {
     const db = await createAdminClient()
     // 明确指定要查询的字段，确保 password_hash 被包含
+    // 排除已删除的用户（deleted_at IS NULL）
     const { data, error } = await db
       .from<{ id: string; email: string; password_hash: string | null }>('users')
       .select('id, email, password_hash')
       .eq('email', email.toLowerCase())
+      .is('deleted_at', null) // 排除已删除的用户
       .maybeSingle() // 使用 maybeSingle 避免多条记录时抛出错误，且在无记录时返回 null 而非错误
 
     if (error) {
@@ -92,31 +94,40 @@ export class PostgreSQLAuthDatabase implements ExtendedAuthDatabase {
    * 创建新用户
    *
    * @param email - 用户邮箱
-   * @param passwordHash - 密码哈希值
+   * @param passwordHash - 密码哈希值（可以为 null，表示首次登录时设置密码）
+   * @param role - 用户角色（可选，默认为 'admin'）
    * @returns 创建的用户对象
    * @throws {Error} 创建失败时抛出错误
    *
    * @example
    * ```typescript
    * const hash = await hashPassword('password123')
-   * const user = await db.createUser('new@example.com', hash)
+   * const user = await db.createUser('new@example.com', hash, 'photographer')
    * ```
    */
   async createUser(
     email: string,
-    passwordHash: string
+    passwordHash: string | null,
+    role: 'admin' | 'photographer' | 'retoucher' | 'guest' = 'admin'
   ): Promise<{ id: string; email: string }> {
     const db = await createAdminClient()
+    
+    // 验证角色值有效性
+    const validRoles: Array<'admin' | 'photographer' | 'retoucher' | 'guest'> = ['admin', 'photographer', 'retoucher', 'guest']
+    if (!validRoles.includes(role)) {
+      throw new Error(`Invalid role: ${role}. Must be one of: ${validRoles.join(', ')}`)
+    }
+    
     const { data, error } = await db.insert<
-      { id: string; email: string; password_hash: string; role: string; is_active: boolean }
+      { id: string; email: string; password_hash: string | null; role: string; is_active: boolean }
     >(
       'users',
       {
         email: email.toLowerCase(),
         password_hash: passwordHash,
-        role: 'admin',
+        role: role,
         is_active: true,
-      } as unknown as { id: string; email: string; password_hash: string; role: string; is_active: boolean }
+      } as unknown as { id: string; email: string; password_hash: string | null; role: string; is_active: boolean }
     )
 
     if (error || !data || data.length === 0) {
@@ -174,6 +185,7 @@ export class PostgreSQLAuthDatabase implements ExtendedAuthDatabase {
       .select('id', { count: 'exact', head: true })
       .eq('role', 'admin')
       .eq('is_active', true)
+      .is('deleted_at', null) // 排除已删除的管理员
 
     if (error) {
       console.error('Failed to check admin existence:', error)

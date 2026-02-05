@@ -217,15 +217,15 @@ describe('GET /api/public/albums/[slug]/download-selected', () => {
       }
 
       expect(response.status).toBe(200)
-      expect(data.albumTitle).toBe('Test Album')
-      expect(data.count).toBe(2)
-      expect(data.photos).toHaveLength(2)
-      expect(data.photos[0].id).toBe('photo-1')
-      expect(data.photos[0].filename).toBe('photo1.jpg')
-      expect(data.photos[0].url).toBe('https://presigned-url-1.com/photo-1.jpg')
-      expect(data.photos[1].id).toBe('photo-2')
-      expect(data.photos[1].filename).toBe('photo2.jpg')
-      expect(data.photos[1].url).toBe('https://presigned-url-2.com/photo-2.jpg')
+      expect(data.data.albumTitle).toBe('Test Album')
+      expect(data.data.count).toBe(2)
+      expect(data.data.photos).toHaveLength(2)
+      expect(data.data.photos[0].id).toBe('photo-1')
+      expect(data.data.photos[0].filename).toBe('photo1.jpg')
+      expect(data.data.photos[0].url).toBe('https://presigned-url-1.com/photo-1.jpg')
+      expect(data.data.photos[1].id).toBe('photo-2')
+      expect(data.data.photos[1].filename).toBe('photo2.jpg')
+      expect(data.data.photos[1].url).toBe('https://presigned-url-2.com/photo-2.jpg')
       
       // Verify Worker API was called correctly
       expect(mockFetch).toHaveBeenCalledTimes(2)
@@ -281,7 +281,7 @@ describe('GET /api/public/albums/[slug]/download-selected', () => {
       const data = await response.json()
 
       expect(response.status).toBe(400)
-      expect(data.error.code).toBe('NO_SELECTION')
+      expect(data.error.code).toBe('VALIDATION_ERROR')
       expect(data.error.message).toContain('没有已选照片')
     })
   })

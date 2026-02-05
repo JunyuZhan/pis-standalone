@@ -9,29 +9,29 @@ import { POST } from './route'
 import { createMockRequest } from '@/test/test-utils'
 import { checkRateLimit } from '@/middleware-rate-limit'
 
-// Mock dependencies
-vi.mock('@/lib/database', () => {
-  const mockSupabaseClient = {
-    from: vi.fn(),
-  }
-
+// Mock dependencies - 在顶层定义以便测试中访问
+const { mockSupabaseClient } = vi.hoisted(() => {
   return {
-    createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+    mockSupabaseClient: {
+      from: vi.fn(),
+    }
   }
 })
+
+vi.mock('@/lib/database', () => ({
+  createClient: vi.fn().mockResolvedValue(mockSupabaseClient),
+}))
 
 vi.mock('@/middleware-rate-limit', () => ({
   checkRateLimit: vi.fn(),
 }))
 
 describe('POST /api/public/albums/[slug]/verify-password', () => {
-  let mockSupabaseClient: any
 
   beforeEach(async () => {
     vi.clearAllMocks()
     
     const { createClient } = await import('@/lib/database')
-    mockSupabaseClient = await createClient()
     
     // 默认允许速率限制
     vi.mocked(checkRateLimit).mockResolvedValue({

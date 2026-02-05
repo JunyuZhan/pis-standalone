@@ -52,18 +52,38 @@ const createMockAlbum = (overrides?: Partial<Database['public']['Tables']['album
   id: 'album-1',
   title: 'Test Album',
   slug: 'test-album',
-  created_at: '2024-01-01T00:00:00Z',
-  updated_at: '2024-01-01T00:00:00Z',
-  watermark_enabled: false,
-  watermark_config: null,
-  color_grading: null,
+  description: null,
+  cover_photo_id: null,
+  allow_download: true,
+  is_public: true,
   password: null,
   expires_at: null,
-  is_public: true,
-  photographer_id: 'photographer-1',
-  cover_photo_id: null,
-  description: null,
-  template_id: null,
+  layout: 'masonry',
+  deleted_at: null,
+  sort_rule: 'capture_desc',
+  allow_batch_download: true,
+  show_exif: true,
+  allow_share: true,
+  watermark_enabled: false,
+  watermark_type: null,
+  watermark_config: {},
+  color_grading: null,
+  enable_human_retouch: false,
+  enable_ai_retouch: false,
+  ai_retouch_config: {},
+  share_title: null,
+  share_description: null,
+  share_image_url: null,
+  poster_image_url: null,
+  event_date: null,
+  location: null,
+  is_live: false,
+  photo_count: 0,
+  selected_count: 0,
+  view_count: 0,
+  metadata: {},
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: '2024-01-01T00:00:00Z',
   ...overrides,
 })
 
@@ -173,7 +193,7 @@ describe('AlbumSettingsForm', () => {
     
     // 查找保存按钮（可能是提交按钮或带"保存"文本的按钮）
     const saveButton = screen.getByRole('button', { name: /保存/i }) || 
-                      screen.getByRole('button', { type: 'submit' })
+                      screen.getByRole('button', { name: /save|保存/i })
     await user.click(saveButton)
     
     await waitFor(() => {

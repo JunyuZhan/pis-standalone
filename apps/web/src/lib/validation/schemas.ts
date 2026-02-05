@@ -68,9 +68,85 @@ export const changePasswordSchema = z.object({
   path: ['confirmPassword'],
 });
 
+export const setupPasswordSchema = z.object({
+  email: emailSchema,
+  password: passwordSchema,
+});
+
+// ============================================
+// 用户管理相关
+// ============================================
+
+export const userIdSchema = z.object({
+  id: uuidSchema,
+});
+
+export const userRoleSchema = z.enum(['admin', 'photographer', 'retoucher', 'guest'], {
+  errorMap: () => ({ message: '角色必须是 admin、photographer、retoucher 或 guest 之一' }),
+});
+
+export const createUserSchema = z.object({
+  email: emailSchema,
+  password: passwordSchema.optional(), // 可选，首次登录时设置
+  role: userRoleSchema.optional().default('admin'),
+});
+
+export const updateUserSchema = z.object({
+  email: emailSchema.optional(),
+  role: userRoleSchema.optional(),
+  is_active: z.boolean().optional(),
+});
+
+export const userListQuerySchema = z.object({
+  page: z.string().optional().transform((val) => {
+    const num = parseInt(val || '1', 10);
+    return Math.max(1, isNaN(num) ? 1 : num);
+  }),
+  limit: z.string().optional().transform((val) => {
+    const num = parseInt(val || '50', 10);
+    return Math.max(1, Math.min(100, isNaN(num) ? 50 : num));
+  }),
+  role: userRoleSchema.optional(),
+  is_active: z.string().optional().transform((val) => {
+    // 如果值不存在，返回 undefined；否则转换为布尔值
+    return val === undefined ? undefined : val === 'true';
+  }),
+  search: z.string().optional(), // 邮箱搜索
+});
+
 // ============================================
 // 相册相关
 // ============================================
+
+const watermarkItemSchema = z.object({
+  type: z.enum(['text', 'logo'], { errorMap: () => ({ message: '水印类型必须是 text 或 logo' }) }),
+  text: z.string().optional(),
+  logoUrl: z.string().optional(),
+  opacity: z.number().min(0, '透明度必须在 0-1 之间').max(1, '透明度必须在 0-1 之间').optional(),
+}).superRefine((data, ctx) => {
+  if (data.type === 'text') {
+    if (!data.text || data.text.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '文字水印内容不能为空',
+        path: ['text']
+      });
+    }
+  }
+  if (data.type === 'logo') {
+    if (!data.logoUrl || data.logoUrl.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Logo URL 不能为空',
+        path: ['logoUrl']
+      });
+    }
+  }
+});
+
+const watermarkConfigSchema = z.object({
+  watermarks: z.array(watermarkItemSchema).max(6, '最多支持6个水印')
+}, { invalid_type_error: '水印配置格式错误' });
 
 export const createAlbumSchema = z.object({
   title: z.string().min(1, '标题不能为空').max(200, '标题最多 200 个字符'),
@@ -89,20 +165,30 @@ export const createAlbumSchema = z.object({
   show_exif: z.boolean().optional(),
   watermark_enabled: z.boolean().optional(),
   watermark_type: z.enum(['text', 'logo']).optional().or(z.null()),
-  watermark_config: z.record(z.unknown()).optional(),
+  watermark_config: watermarkConfigSchema.nullable().optional(), // 兼容旧格式，优先使用新格式
   color_grading: z.object({
     preset: z.string().min(1).max(50),
   }).optional().or(z.null()),
   password: z.string().max(100, '密码最多 100 个字符').optional().or(z.null()),
+  upload_token: z.string().max(255, '上传令牌最多 255 个字符').optional().or(z.null()), // FTP/API 上传令牌（可选，创建时自动生成）
   expires_at: z.string().datetime().optional().or(z.null()),
   expiresAt: z.string().datetime().optional().or(z.null()), // 兼容 camelCase
   templateId: uuidSchema.optional().or(z.null()),
   stylePreset: z.string().max(50).optional().or(z.null()),
-}).refine((data) => {
+}).superRefine((data, ctx) => {
   // 验证海报图片URL不能是内网地址（SSRF 防护）
   if (data.poster_image_url) {
     try {
       const url = new URL(data.poster_image_url);
+      const protocol = url.protocol.toLowerCase();
+      if (protocol !== 'http:' && protocol !== 'https:') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '必须使用 http 或 https 协议',
+          path: ['poster_image_url']
+        });
+        return;
+      }
       const hostname = url.hostname.toLowerCase();
       const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
       const isPrivateIP =
@@ -114,36 +200,42 @@ export const createAlbumSchema = z.object({
         hostname.endsWith('.local');
       
       if (isLocalhost || isPrivateIP) {
-        return false;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '海报图片URL不能使用内网地址',
+          path: ['poster_image_url']
+        });
       }
     } catch {
-      return false;
+      // URL parsing error is handled by z.string().url() usually, but if it slipped through:
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '海报图片URL格式无效',
+        path: ['poster_image_url']
+      });
     }
   }
-  return true;
-}, {
-  message: '海报图片URL不能使用内网地址',
-  path: ['poster_image_url'],
 });
 
 export const updateAlbumSchema = z.object({
-  title: z.string().min(1).max(200).optional(),
+  title: z.string().min(1, '相册标题不能为空').max(200).optional(),
   description: z.string().max(1000).optional().or(z.null()),
   cover_photo_id: uuidSchema.optional().or(z.null()),
   is_public: z.boolean().optional(),
   is_live: z.boolean().optional(),
-  layout: z.enum(['masonry', 'grid', 'carousel']).optional(),
-  sort_rule: z.enum(['capture_desc', 'capture_asc', 'manual']).optional(),
+  layout: z.enum(['masonry', 'grid', 'carousel'], { errorMap: () => ({ message: '无效的布局类型' }) }).optional(),
+  sort_rule: z.enum(['capture_desc', 'capture_asc', 'manual'], { errorMap: () => ({ message: '无效的排序规则' }) }).optional(),
   allow_download: z.boolean().optional(),
   allow_batch_download: z.boolean().optional(),
   show_exif: z.boolean().optional(),
   watermark_enabled: z.boolean().optional(),
   watermark_type: z.enum(['text', 'logo']).optional().or(z.null()),
-  watermark_config: z.record(z.unknown()).optional().or(z.null()),
+  watermark_config: watermarkConfigSchema.nullable().optional(),
   color_grading: z.object({
     preset: z.string().min(1).max(50),
   }).optional().or(z.null()),
   password: z.string().max(100).optional().or(z.null()),
+  upload_token: z.string().max(255, '上传令牌最多 255 个字符').optional().or(z.null()), // FTP/API 上传令牌（可选，用于重置）
   expires_at: z.string().datetime().optional().or(z.null()),
   share_title: z.string().max(200).optional().or(z.null()),
   share_description: z.string().max(1000).optional().or(z.null()),
@@ -151,13 +243,26 @@ export const updateAlbumSchema = z.object({
   poster_image_url: z.string().url().optional().or(z.null()),
   event_date: z.string().datetime().optional().or(z.null()),
   location: z.string().max(200).optional().or(z.null()),
-}).refine((data) => {
+}).superRefine((data, ctx) => {
   // 验证 URL 不能是内网地址（SSRF 防护）
-  const urls = [data.share_image_url, data.poster_image_url].filter(Boolean);
-  for (const url of urls) {
-    if (url) {
+  const urls = [
+    { key: 'share_image_url', val: data.share_image_url },
+    { key: 'poster_image_url', val: data.poster_image_url }
+  ];
+  
+  for (const { key, val } of urls) {
+    if (val) {
       try {
-        const urlObj = new URL(url);
+        const urlObj = new URL(val);
+        const protocol = urlObj.protocol.toLowerCase();
+        if (protocol !== 'http:' && protocol !== 'https:') {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: '必须使用 http 或 https 协议',
+            path: [key]
+          });
+          continue;
+        }
         const hostname = urlObj.hostname.toLowerCase();
         const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
         const isPrivateIP =
@@ -169,17 +274,22 @@ export const updateAlbumSchema = z.object({
           hostname.endsWith('.local');
         
         if (isLocalhost || isPrivateIP) {
-          return false;
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: '图片URL不能使用内网地址',
+            path: [key]
+          });
         }
       } catch {
-        return false;
+        // Invalid URL
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '图片URL格式无效',
+          path: [key]
+        });
       }
     }
   }
-  return true;
-}, {
-  message: '图片URL不能使用内网地址',
-  path: ['share_image_url', 'poster_image_url'],
 });
 
 export const albumIdSchema = z.object({

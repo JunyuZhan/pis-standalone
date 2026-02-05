@@ -48,7 +48,7 @@ describe('POST /api/admin/albums/[id]/check-duplicate', () => {
       mockGetCurrentUser.mockResolvedValue(null)
 
       const request = createMockRequest(
-        'http://localhost:3000/api/admin/albums/album-123/check-duplicate',
+        'http://localhost:3000/api/admin/albums/550e8400-e29b-41d4-a716-446655440000/check-duplicate',
         {
           method: 'POST',
           body: {
@@ -59,7 +59,7 @@ describe('POST /api/admin/albums/[id]/check-duplicate', () => {
       )
 
       const response = await POST(request, {
-        params: Promise.resolve({ id: 'album-123' }),
+        params: Promise.resolve({ id: '550e8400-e29b-41d4-a716-446655440000' }),
       })
       const data = await response.json()
 
@@ -91,6 +91,22 @@ describe('POST /api/admin/albums/[id]/check-duplicate', () => {
     })
 
     it('should return 400 for missing required fields', async () => {
+      // Mock album exists
+      const mockSelect = vi.fn().mockReturnThis()
+      const mockEq = vi.fn().mockReturnThis()
+      const mockIs = vi.fn().mockReturnThis()
+      const mockSingle = vi.fn().mockResolvedValue({
+        data: { id: '550e8400-e29b-41d4-a716-446655440000' },
+        error: null,
+      })
+
+      mockDb.from.mockReturnValue({
+        select: mockSelect,
+        eq: mockEq,
+        is: mockIs,
+        single: mockSingle,
+      })
+
       const request = createMockRequest(
         'http://localhost:3000/api/admin/albums/album-123/check-duplicate',
         {

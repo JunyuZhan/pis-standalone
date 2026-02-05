@@ -84,7 +84,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       
     return NextResponse.json({ photos: photos || [] })
     
-  } catch (err: any) {
-    return handleError(err, 'Search failed')
+  } catch (err: unknown) {
+    return handleError(err as Error, 'Search failed')
   }
 }

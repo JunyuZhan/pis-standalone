@@ -1,17 +1,9 @@
 import type { NextConfig } from 'next'
 import createNextIntlPlugin from 'next-intl/plugin'
-import { config } from 'dotenv'
-import { resolve } from 'path'
-import { existsSync } from 'fs'
 
-const rootDir = resolve(__dirname, '../../')
-
-// 从 monorepo 根目录加载 .env（统一配置）
-// 先加载 .env，然后加载 .env.local（.env.local 会覆盖 .env 中的配置）
-config({ path: resolve(rootDir, '.env') })
-if (existsSync(resolve(rootDir, '.env.local'))) {
-  config({ path: resolve(rootDir, '.env.local'), override: true })
-}
+// Next.js 会自动从项目根目录加载 .env.local 文件
+// 开发环境使用 .env.local，生产环境通过平台环境变量注入
+// 无需手动加载，避免重复加载导致警告
 
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts')
 
@@ -128,6 +120,8 @@ const nextConfig: NextConfig = {
     contentDispositionType: 'attachment',
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
+  // Turbopack 配置（显式声明以避免 Next.js 15.5.6 的误报警告）
+  turbopack: {},
   experimental: {
     serverActions: {
       bodySizeLimit: '10mb',

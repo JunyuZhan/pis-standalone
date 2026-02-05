@@ -63,8 +63,8 @@ function getDatabaseConfigFromEnv(): DatabaseConfig {
   ).toLowerCase()
 
   if (dbType === 'postgresql') {
-    return {
-      type: 'postgresql',
+    const config = {
+      type: 'postgresql' as const,
       host:
         process.env.DATABASE_HOST ||
         process.env.POSTGRES_HOST ||
@@ -89,6 +89,19 @@ function getDatabaseConfigFromEnv(): DatabaseConfig {
         '',
       ssl: process.env.DATABASE_SSL === 'true',
     }
+    
+    // 调试日志：检查配置是否完整
+    if (!config.password) {
+      console.error('[Database Config] ⚠️  DATABASE_PASSWORD is empty or not set!')
+      console.error('[Database Config] Available env vars:', {
+        DATABASE_PASSWORD: process.env.DATABASE_PASSWORD ? 'SET' : 'NOT SET',
+        DATABASE_HOST: config.host,
+        DATABASE_USER: config.user,
+        DATABASE_NAME: config.database,
+      })
+    }
+    
+    return config
   }
 
   // Supabase 模式

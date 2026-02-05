@@ -73,9 +73,7 @@ async function loadBlurhashModule() {
     }
 
     // 兼容 ESM/CJS interop (有些环境下可能是 default export)
-    // @ts-ignore
     if (blurhash && blurhash.default && typeof blurhash.default.decode === 'function') {
-      // @ts-ignore
       blurhashModule = blurhash.default
       return blurhashModule
     }

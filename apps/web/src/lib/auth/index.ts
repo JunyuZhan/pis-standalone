@@ -152,6 +152,9 @@ export async function getRefreshToken(): Promise<string | null> {
 /**
  * 获取当前已认证的用户（服务端）
  *
+ * @description
+ * 如果访问令牌过期但刷新令牌有效，会自动刷新访问令牌。
+ *
  * @returns {Promise<AuthUser|null>} 用户对象，未认证返回 null
  *
  * @example
@@ -164,15 +167,40 @@ export async function getRefreshToken(): Promise<string | null> {
  */
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const token = await getAuthToken()
-  if (!token) return null
+  const refreshToken = await getRefreshToken()
 
-  const payload = await verifyToken(token)
-  if (!payload || payload.type !== 'access') return null
-
-  return {
-    id: payload.sub,
-    email: payload.email,
+  // 检查访问令牌是否有效
+  if (token) {
+    const payload = await verifyToken(token)
+    if (payload && payload.type === 'access') {
+      return {
+        id: payload.sub,
+        email: payload.email,
+      }
+    }
   }
+
+  // 如果访问令牌无效（不存在或过期）且刷新令牌存在，尝试刷新
+  if (refreshToken) {
+    const refreshPayload = await verifyToken(refreshToken)
+    if (refreshPayload && refreshPayload.type === 'refresh') {
+      const user: AuthUser = {
+        id: refreshPayload.sub,
+        email: refreshPayload.email,
+      }
+      
+      // 创建新会话（会自动设置新的 cookie）
+      await createSession(user)
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[Auth] Token refreshed in getCurrentUser for user:', user.email)
+      }
+      
+      return user
+    }
+  }
+
+  return null
 }
 
 /**
@@ -278,10 +306,11 @@ export interface AuthDatabase {
    * 创建新用户
    *
    * @param email - 用户邮箱
-   * @param passwordHash - 密码哈希值
+   * @param passwordHash - 密码哈希值（可以为 null，表示首次登录时设置密码）
+   * @param role - 用户角色（可选，默认为 'admin'）
    * @returns 创建的用户对象
    */
-  createUser(email: string, passwordHash: string): Promise<{ id: string; email: string }>
+  createUser(email: string, passwordHash: string | null, role?: 'admin' | 'photographer' | 'retoucher' | 'guest'): Promise<{ id: string; email: string }>
 
   /**
    * 更新用户密码

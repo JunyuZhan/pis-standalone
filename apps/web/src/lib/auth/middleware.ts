@@ -62,10 +62,19 @@ import { getUserFromRequest, updateSessionMiddleware } from './jwt-helpers'
  */
 export async function updateSession(request: NextRequest) {
   // 更新会话（刷新令牌）
-  const response = await updateSessionMiddleware(request)
+  const { response, refreshedUser } = await updateSessionMiddleware(request)
 
   // 检查用户认证状态
-  const user = await getUserFromRequest(request)
+  // 如果 token 被刷新了，使用刷新后的用户信息；否则从 request 中读取
+  const user = refreshedUser || await getUserFromRequest(request)
+  
+  // 调试日志
+  if (process.env.NODE_ENV === 'development') {
+    const pathname = request.nextUrl.pathname
+    if (pathname.startsWith('/admin')) {
+      console.log(`[Auth Middleware] Path: ${pathname}, User: ${user ? user.email : 'null'}`)
+    }
+  }
 
   if (request.nextUrl.pathname.startsWith('/admin')) {
     // 登录页面逻辑

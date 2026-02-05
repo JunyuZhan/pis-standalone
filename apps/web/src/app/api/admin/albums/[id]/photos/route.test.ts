@@ -36,6 +36,7 @@ describe('GET /api/admin/albums/[id]/photos', () => {
     const { getCurrentUser } = await import('@/lib/auth/api-helpers')
     
     mockDb = createMockDatabaseClient()
+    mockDb.update = vi.fn().mockResolvedValue({ data: [], error: null })
     vi.mocked(createClient).mockResolvedValue(mockDb)
     mockGetCurrentUser = vi.mocked(getCurrentUser)
     
@@ -131,25 +132,41 @@ describe('GET /api/admin/albums/[id]/photos', () => {
           }
         }
         if (table === 'photos') {
-          const mockSelectPhotos = vi.fn().mockReturnThis()
-          const mockEqPhotos = vi.fn().mockReturnThis()
-          const mockIsPhotos = vi.fn().mockReturnThis()
-          const mockOrderPhotos = vi.fn().mockReturnThis()
-          const mockLimitPhotos = vi.fn().mockReturnThis()
-          const mockOffsetPhotos = vi.fn().mockResolvedValue({
+          // Mock selected count query which calls select().eq().eq().eq().is().execute()
+          // Mock list query which calls select().eq().order().order().limit().offset().is().execute()
+          
+          const mockExecute = vi.fn()
+          
+          // Use mockImplementationOnce for execute to distinguish calls if needed
+          // But here we can just return based on what's called or use resolved value
+          
+          // Chain builder
+          const builder = {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            is: vi.fn().mockReturnThis(),
+            neq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockReturnThis(),
+            offset: vi.fn().mockReturnThis(),
+            execute: mockExecute,
+          }
+
+          // First call is for photos list
+          mockExecute.mockResolvedValueOnce({
             data: photos,
-            error: null,
             count: 1,
+            error: null,
           })
 
-          return {
-            select: mockSelectPhotos,
-            eq: mockEqPhotos,
-            is: mockIsPhotos,
-            order: mockOrderPhotos,
-            limit: mockLimitPhotos,
-            offset: mockOffsetPhotos,
-          }
+          // Second call (if any) is for selected count
+          mockExecute.mockResolvedValueOnce({
+            data: photos, // Assuming same photos are selected
+            count: 1,
+            error: null,
+          })
+
+          return builder
         }
         return mockDb.from()
       })
@@ -164,7 +181,7 @@ describe('GET /api/admin/albums/[id]/photos', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      // data.success is not returned by createSuccessResponse
       expect(data.data.album.id).toBe(albumId)
       expect(data.data.photos).toHaveLength(1)
       expect(data.data.pagination.page).toBe(1)
@@ -185,17 +202,21 @@ describe('GET /api/admin/albums/[id]/photos', () => {
           }
         }
         if (table === 'photos') {
+          const mockExecute = vi.fn().mockResolvedValue({
+            data: [],
+            error: null,
+            count: 0,
+          })
+          
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
             is: vi.fn().mockReturnThis(),
+            neq: vi.fn().mockReturnThis(),
             order: vi.fn().mockReturnThis(),
             limit: vi.fn().mockReturnThis(),
-            offset: vi.fn().mockResolvedValue({
-              data: [],
-              error: null,
-              count: 0,
-            }),
+            offset: vi.fn().mockReturnThis(),
+            execute: mockExecute,
           }
         }
         return mockDb.from()
@@ -311,7 +332,7 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
     })
 
     it('should return 400 if too many photos', async () => {
-      const photoIds = Array.from({ length: 101 }, (_, i) => `photo-${i}`)
+      const photoIds = Array.from({ length: 101 }, (_, i) => `550e8400-e29b-41d4-a716-44665544${i.toString().padStart(4, '0')}`)
       const request = createMockRequest(
         'http://localhost:3000/api/admin/albums/album-123/photos',
         { method: 'DELETE', body: { photoIds } }
@@ -330,7 +351,7 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
   describe('photo deletion', () => {
     it('should delete photos successfully', async () => {
       const albumId = '550e8400-e29b-41d4-a716-446655440000'
-      const photoIds = ['photo-1', 'photo-2']
+      const photoIds = ['550e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440002']
       const album = {
         id: albumId,
         slug: 'test-album',
@@ -338,45 +359,35 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
       }
       const photos = [
         {
-          id: 'photo-1',
+          id: photoIds[0],
           original_key: 'original-1.jpg',
           thumb_key: 'thumb-1.jpg',
           preview_key: 'preview-1.jpg',
         },
         {
-          id: 'photo-2',
+          id: photoIds[1],
           original_key: 'original-2.jpg',
           thumb_key: 'thumb-2.jpg',
           preview_key: 'preview-2.jpg',
         },
       ]
 
-      let callCount = 0
       mockDb.from.mockImplementation((table: string) => {
         if (table === 'albums') {
-          callCount++
-          if (callCount === 1) {
-            return {
-              select: vi.fn().mockReturnThis(),
-              eq: vi.fn().mockReturnThis(),
-              is: vi.fn().mockReturnThis(),
-              single: vi.fn().mockResolvedValue({
-                data: album,
-                error: null,
-              }),
-            }
-          }
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
             is: vi.fn().mockReturnThis(),
             single: vi.fn().mockResolvedValue({
-              data: { count: 0 },
+              data: album,
               error: null,
             }),
           }
         }
         if (table === 'photos') {
+          // For deletion check: select().eq().is().in().execute()
+          // For update: update().in()
+          
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
@@ -385,14 +396,15 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
               data: photos,
               error: null,
             }),
+            update: vi.fn().mockReturnThis(),
+            execute: vi.fn().mockResolvedValue({
+              data: photos,
+              count: 2,
+              error: null,
+            }), // Add update here
           }
         }
         return mockDb.from()
-      })
-
-      mockDb.update.mockResolvedValue({
-        data: [{ id: 'photo-1' }],
-        error: null,
       })
 
       const request = createMockRequest(
@@ -408,6 +420,11 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
       expect(response.status).toBe(200)
       expect(data.success).toBe(true)
       expect(data.deletedCount).toBe(2)
+      
+      // Verify db.update was called for each photo (2) + photo count update (1)
+      expect(mockDb.update).toHaveBeenCalledTimes(3)
+      // Verify update albums photo_count was called
+      expect(mockDb.update).toHaveBeenCalledWith('albums', expect.objectContaining({ photo_count: expect.any(Number) }), { id: albumId })
     })
 
     it('should return 404 if album does not exist', async () => {
@@ -425,7 +442,7 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
 
       const request = createMockRequest(
         `http://localhost:3000/api/admin/albums/${albumId}/photos`,
-        { method: 'DELETE', body: { photoIds: ['photo-1'] } }
+        { method: 'DELETE', body: { photoIds: ['550e8400-e29b-41d4-a716-446655440001'] } }
       )
 
       const response = await DELETE(request, {
@@ -445,7 +462,6 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
         cover_photo_id: null,
       }
 
-      let callCount = 0
       mockDb.from.mockImplementation((table: string) => {
         if (table === 'albums') {
           return {
@@ -459,7 +475,6 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
           }
         }
         if (table === 'photos') {
-          callCount++
           return {
             select: vi.fn().mockReturnThis(),
             eq: vi.fn().mockReturnThis(),
@@ -475,7 +490,7 @@ describe('DELETE /api/admin/albums/[id]/photos', () => {
 
       const request = createMockRequest(
         `http://localhost:3000/api/admin/albums/${albumId}/photos`,
-        { method: 'DELETE', body: { photoIds: ['photo-1'] } }
+        { method: 'DELETE', body: { photoIds: ['550e8400-e29b-41d4-a716-446655440001'] } }
       )
 
       const response = await DELETE(request, {

@@ -43,7 +43,7 @@ describe('DELETE /api/admin/albums/batch', () => {
 
       const request = createMockRequest(
         'http://localhost:3000/api/admin/albums/batch',
-        { method: 'DELETE', body: { albumIds: ['album-1'], operation: 'delete' } }
+        { method: 'DELETE', body: { albumIds: ['550e8400-e29b-41d4-a716-446655440000'], operation: 'delete' } }
       )
 
       const response = await DELETE(request)
@@ -71,14 +71,14 @@ describe('DELETE /api/admin/albums/batch', () => {
     it('should return 400 for invalid operation', async () => {
       const request = createMockRequest(
         'http://localhost:3000/api/admin/albums/batch',
-        { method: 'DELETE', body: { albumIds: ['album-1'], operation: 'invalid' } }
+        { method: 'DELETE', body: { albumIds: ['550e8400-e29b-41d4-a716-446655440000'], operation: 'invalid' } }
       )
 
       const response = await DELETE(request)
       const data = await response.json()
 
       expect(response.status).toBe(400)
-      expect(data.error.code).toBe('BAD_REQUEST')
+      expect(data.error.code).toBe('VALIDATION_ERROR')
     })
   })
 
@@ -102,8 +102,9 @@ describe('DELETE /api/admin/albums/batch', () => {
         }),
       })
 
+      // Mock update specifically for albums
       mockDb.update.mockResolvedValue({
-        data: [{ id: albumIds[0] }],
+        data: [{ id: albumIds[0] }, { id: albumIds[1] }],
         error: null,
       })
 
@@ -116,11 +117,13 @@ describe('DELETE /api/admin/albums/batch', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       expect(data.data.deletedCount).toBe(2)
     })
 
     it('should return 404 if no valid albums found', async () => {
+      const albumIds = ['550e8400-e29b-41d4-a716-446655440000']
+
       mockDb.from.mockReturnValue({
         select: vi.fn().mockReturnThis(),
         in: vi.fn().mockReturnThis(),
@@ -132,7 +135,7 @@ describe('DELETE /api/admin/albums/batch', () => {
 
       const request = createMockRequest(
         'http://localhost:3000/api/admin/albums/batch',
-        { method: 'DELETE', body: { albumIds: ['album-1'], operation: 'delete' } }
+        { method: 'DELETE', body: { albumIds, operation: 'delete' } }
       )
 
       const response = await DELETE(request)
@@ -170,7 +173,13 @@ describe('PATCH /api/admin/albums/batch', () => {
 
       const request = createMockRequest(
         'http://localhost:3000/api/admin/albums/batch',
-        { method: 'PATCH', body: { albumIds: ['album-1'], updates: {} } }
+        {
+          method: 'PATCH',
+          body: {
+            albumIds: ['550e8400-e29b-41d4-a716-446655440000'],
+            updates: { is_public: true },
+          },
+        }
       )
 
       const response = await PATCH(request)
@@ -194,6 +203,25 @@ describe('PATCH /api/admin/albums/batch', () => {
       expect(response.status).toBe(400)
       expect(data.error.code).toBe('VALIDATION_ERROR')
     })
+
+    it('should return 400 if no updates provided', async () => {
+      const request = createMockRequest(
+        'http://localhost:3000/api/admin/albums/batch',
+        {
+          method: 'PATCH',
+          body: {
+            albumIds: ['550e8400-e29b-41d4-a716-446655440000'],
+            updates: {},
+          },
+        }
+      )
+
+      const response = await PATCH(request)
+      const data = await response.json()
+
+      expect(response.status).toBe(400)
+      expect(data.error.code).toBe('VALIDATION_ERROR')
+    })
   })
 
   describe('batch update', () => {
@@ -202,9 +230,22 @@ describe('PATCH /api/admin/albums/batch', () => {
         '550e8400-e29b-41d4-a716-446655440000',
         '550e8400-e29b-41d4-a716-446655440001',
       ]
+      const albums = [
+        { id: albumIds[0], title: 'Album 1' },
+        { id: albumIds[1], title: 'Album 2' },
+      ]
+
+      mockDb.from.mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        is: vi.fn().mockResolvedValue({
+          data: albums,
+          error: null,
+        }),
+      })
 
       mockDb.update.mockResolvedValue({
-        data: [{ id: albumIds[0] }],
+        data: [{ id: albumIds[0] }, { id: albumIds[1] }],
         error: null,
       })
 
@@ -214,10 +255,7 @@ describe('PATCH /api/admin/albums/batch', () => {
           method: 'PATCH',
           body: {
             albumIds,
-            updates: {
-              is_public: true,
-              layout: 'grid',
-            },
+            updates: { is_public: true },
           },
         }
       )
@@ -226,12 +264,22 @@ describe('PATCH /api/admin/albums/batch', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
       expect(data.data.updatedCount).toBe(2)
     })
 
     it('should update only provided fields', async () => {
       const albumIds = ['550e8400-e29b-41d4-a716-446655440000']
+      const albums = [{ id: albumIds[0], title: 'Album 1' }]
+
+      mockDb.from.mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockReturnThis(),
+        is: vi.fn().mockResolvedValue({
+          data: albums,
+          error: null,
+        }),
+      })
 
       mockDb.update.mockResolvedValue({
         data: [{ id: albumIds[0] }],
@@ -244,9 +292,7 @@ describe('PATCH /api/admin/albums/batch', () => {
           method: 'PATCH',
           body: {
             albumIds,
-            updates: {
-              is_public: false,
-            },
+            updates: { allow_download: false },
           },
         }
       )
@@ -255,7 +301,7 @@ describe('PATCH /api/admin/albums/batch', () => {
       const data = await response.json()
 
       expect(response.status).toBe(200)
-      expect(data.success).toBe(true)
+      expect(data.data.success).toBe(true)
     })
   })
 })

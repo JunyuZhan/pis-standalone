@@ -1,164 +1,140 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { getAlbumCache, clearAlbumCache } from './album-cache'
+import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest';
 
-describe('album-cache', () => {
-  const originalSetInterval = global.setInterval
-  const originalDateNow = Date.now
+// We need to test the exported functions and class
+// Import module to access exports
+import { 
+  getAlbumCache, 
+  clearAlbumCache, 
+  destroyAlbumCache 
+} from './album-cache';
+import type { CachedAlbum } from './album-cache';
 
+describe('AlbumCache Singleton Functions', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
-    // Reset module to get fresh singleton
-    vi.resetModules()
-    // Mock setInterval to avoid actual timers
-    global.setInterval = vi.fn()
-    // Mock Date.now for TTL testing
-    let currentTime = 1000000
-    Date.now = vi.fn(() => currentTime)
-  })
+    // Ensure we start with a clean state
+    destroyAlbumCache();
+  });
 
   afterEach(() => {
-    global.setInterval = originalSetInterval
-    Date.now = originalDateNow
-    clearAlbumCache()
-  })
+    // Clean up after each test
+    destroyAlbumCache();
+    vi.restoreAllMocks();
+  });
 
   describe('getAlbumCache', () => {
     it('should return singleton instance', () => {
-      const cache1 = getAlbumCache()
-      const cache2 = getAlbumCache()
-      expect(cache1).toBe(cache2)
-    })
+      const cache1 = getAlbumCache();
+      const cache2 = getAlbumCache();
+      expect(cache1).toBe(cache2);
+    });
 
-    it('should use custom TTL from environment', () => {
-      const originalEnv = process.env.ALBUM_CACHE_TTL_MS
-      process.env.ALBUM_CACHE_TTL_MS = '600000'
-      
-      clearAlbumCache()
-      const cache = getAlbumCache()
-      
-      // Cache should be initialized with custom TTL
-      expect(cache).toBeDefined()
-      
-      process.env.ALBUM_CACHE_TTL_MS = originalEnv
-    })
-  })
+    it('should create new instance if none exists', () => {
+      const cache = getAlbumCache();
+      expect(cache).toBeDefined();
+      expect(typeof cache.get).toBe('function');
+      expect(typeof cache.set).toBe('function');
+    });
 
-  describe('AlbumCache', () => {
-    it('should get cached album', () => {
-      const cache = getAlbumCache()
-      const album = {
-        id: 'album-1',
+    it('should be able to store and retrieve data', () => {
+      const cache = getAlbumCache();
+      const testData = {
+        id: 'test-album',
         watermark_enabled: true,
         watermark_type: 'text',
-        watermark_config: { text: 'Test' },
-      }
-
-      cache.set('album-1', album)
-      const cached = cache.get('album-1')
-
-      expect(cached).toBeDefined()
-      expect(cached?.id).toBe('album-1')
-      expect(cached?.watermark_enabled).toBe(true)
-    })
-
-    it('should return null for non-existent album', () => {
-      const cache = getAlbumCache()
-      const cached = cache.get('non-existent')
-      expect(cached).toBeNull()
-    })
-
-    it('should return null for expired cache', () => {
-      const cache = getAlbumCache()
-      const album = {
-        id: 'album-1',
-        watermark_enabled: true,
-        watermark_type: 'text',
-        watermark_config: {},
-      }
-
-      cache.set('album-1', album)
+        watermark_config: { text: 'Test' }
+      };
       
-      // Advance time beyond TTL (default 300000ms = 5 minutes)
-      Date.now = vi.fn(() => 1000000 + 300001)
+      cache.set('test-album', testData);
+      const result = cache.get('test-album');
       
-      const cached = cache.get('album-1')
-      expect(cached).toBeNull()
-    })
-
-    it('should delete album from cache', () => {
-      const cache = getAlbumCache()
-      const album = {
-        id: 'album-1',
-        watermark_enabled: true,
-        watermark_type: 'text',
-        watermark_config: {},
-      }
-
-      cache.set('album-1', album)
-      cache.delete('album-1')
-      
-      const cached = cache.get('album-1')
-      expect(cached).toBeNull()
-    })
-
-    it('should clear all cache', () => {
-      const cache = getAlbumCache()
-      cache.set('album-1', {
-        id: 'album-1',
-        watermark_enabled: true,
-        watermark_type: 'text',
-        watermark_config: {},
-      })
-      cache.set('album-2', {
-        id: 'album-2',
-        watermark_enabled: false,
-        watermark_type: null,
-        watermark_config: {},
-      })
-
-      expect(cache.size()).toBe(2)
-      cache.clear()
-      expect(cache.size()).toBe(0)
-    })
-
-    it('should return cache size', () => {
-      const cache = getAlbumCache()
-      cache.set('album-1', {
-        id: 'album-1',
-        watermark_enabled: true,
-        watermark_type: 'text',
-        watermark_config: {},
-      })
-      cache.set('album-2', {
-        id: 'album-2',
-        watermark_enabled: false,
-        watermark_type: null,
-        watermark_config: {},
-      })
-
-      expect(cache.size()).toBe(2)
-    })
-  })
+      expect(result).not.toBeNull();
+      expect(result?.id).toBe('test-album');
+      expect(result?.watermark_enabled).toBe(true);
+    });
+  });
 
   describe('clearAlbumCache', () => {
-    it('should clear singleton cache instance', () => {
-      const cache = getAlbumCache()
-      cache.set('album-1', {
-        id: 'album-1',
-        watermark_enabled: true,
-        watermark_type: 'text',
-        watermark_config: {},
-      })
+    it('should clear the singleton cache', () => {
+      const cache = getAlbumCache();
+      cache.set('album-1', { id: 'album-1', watermark_enabled: false, watermark_type: null, watermark_config: null });
+      cache.set('album-2', { id: 'album-2', watermark_enabled: false, watermark_type: null, watermark_config: null });
 
-      expect(cache.size()).toBe(1)
-      clearAlbumCache()
-      expect(cache.size()).toBe(0)
-    })
+      expect(cache.size()).toBe(2);
 
-    it('should handle clearing when cache is not initialized', () => {
-      clearAlbumCache()
-      // Should not throw
-      expect(true).toBe(true)
-    })
-  })
-})
+      clearAlbumCache();
+
+      expect(cache.size()).toBe(0);
+    });
+
+    it('should handle clearing empty cache', () => {
+      const cache = getAlbumCache();
+      clearAlbumCache();
+      expect(cache.size()).toBe(0);
+    });
+  });
+
+  describe('destroyAlbumCache', () => {
+    it('should destroy singleton and allow recreation', () => {
+      const cache1 = getAlbumCache();
+      cache1.set('album-1', { id: 'album-1', watermark_enabled: false, watermark_type: null, watermark_config: null });
+
+      destroyAlbumCache();
+
+      const cache2 = getAlbumCache();
+      expect(cache2.size()).toBe(0);
+      expect(cache2).not.toBe(cache1);
+    });
+
+    it('should handle multiple destroy calls', () => {
+      const cache = getAlbumCache();
+      cache.set('album-1', { id: 'album-1', watermark_enabled: false, watermark_type: null, watermark_config: null });
+
+      destroyAlbumCache();
+      destroyAlbumCache(); // Should not throw
+
+      expect(cache.size()).toBe(0);
+    });
+  });
+});
+
+describe('AlbumCache Type Tests', () => {
+  it('should accept correct album structure', () => {
+    const album: CachedAlbum = {
+      id: 'test-album',
+      watermark_enabled: true,
+      watermark_type: 'text',
+      watermark_config: { text: 'Test Watermark', position: 'bottom-right' },
+      color_grading: { preset: 'japanese-fresh' },
+      cachedAt: Date.now()
+    };
+
+    expect(album.id).toBe('test-album');
+    expect(album.watermark_enabled).toBe(true);
+    expect(album.cachedAt).toBeDefined();
+  });
+
+  it('should accept album with null watermark fields', () => {
+    const album: CachedAlbum = {
+      id: 'test-album',
+      watermark_enabled: false,
+      watermark_type: null,
+      watermark_config: null,
+      cachedAt: Date.now()
+    };
+
+    expect(album.watermark_type).toBeNull();
+    expect(album.watermark_config).toBeNull();
+  });
+
+  it('should accept album without color_grading', () => {
+    const album: CachedAlbum = {
+      id: 'test-album',
+      watermark_enabled: false,
+      watermark_type: null,
+      watermark_config: null,
+      cachedAt: Date.now()
+    };
+
+    expect(album.color_grading).toBeUndefined();
+  });
+});

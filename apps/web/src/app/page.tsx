@@ -10,9 +10,10 @@ import { defaultLocale } from '@/i18n/config'
 type Album = Database['public']['Tables']['albums']['Row']
 type Photo = Database['public']['Tables']['photos']['Row']
 
+export const revalidate = 60
+
 /**
  * 公开相册广场首页 - 专业摄影师作品集
- * 静态导出模式：完全静态化，不支持 ISR
  */
 export default async function HomePage() {
   const t = await getTranslations({ locale: defaultLocale, namespace: 'home' })
@@ -96,7 +97,7 @@ export default async function HomePage() {
           .map(album => album.cover_photo_id)
           .filter((id): id is string => !!id)
         
-        let coverPhotos: any[] = []
+        let coverPhotos: { id: string; thumb_key: string | null; preview_key: string | null }[] = []
         
         // 批量获取封面照片
         if (coverPhotoIds.length > 0) {
@@ -108,7 +109,7 @@ export default async function HomePage() {
               .is('deleted_at', null)
           
           if (coverPhotosResult.data) {
-             coverPhotos = coverPhotosResult.data
+             coverPhotos = coverPhotosResult.data as unknown as { id: string; thumb_key: string | null; preview_key: string | null }[]
           }
         }
 
@@ -127,7 +128,7 @@ export default async function HomePage() {
         
         // 批量获取第一张照片（只查询需要的相册）
         const albumIdsNeedingPhoto = albumsNeedingFirstPhoto.map(a => a.id)
-        let firstPhotos: any[] = []
+        let firstPhotos: { album_id: string; thumb_key: string | null; preview_key: string | null }[] = []
         
         if (albumIdsNeedingPhoto.length > 0) {
           const firstPhotosResult = await db
@@ -140,7 +141,7 @@ export default async function HomePage() {
             .order('captured_at', { ascending: false })
           
           if (firstPhotosResult.data) {
-            firstPhotos = firstPhotosResult.data
+            firstPhotos = firstPhotosResult.data as unknown as { album_id: string; thumb_key: string | null; preview_key: string | null }[]
           }
         }
 

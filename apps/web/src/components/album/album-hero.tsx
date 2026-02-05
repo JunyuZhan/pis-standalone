@@ -102,7 +102,7 @@ export function AlbumHero({ album, coverPhoto, from }: AlbumHeroProps) {
     return `${year}年${month}月${day}日` 
   }
 
-  const eventDate = album.event_date
+  const event_date = album.event_date
   const location = album.location
   const selectedCount = album.selected_count || 0
 
@@ -219,8 +219,8 @@ export function AlbumHero({ album, coverPhoto, from }: AlbumHeroProps) {
               {/* 使用 suppressHydrationWarning 忽略服务端和客户端的时间格式差异 */}
               <span className="text-xs md:text-sm" suppressHydrationWarning>
                 {mounted 
-                  ? (eventDate ? formatDateTime(eventDate) : formatDate(album.created_at))
-                  : (eventDate ? formatDateTime(eventDate) : formatDate(album.created_at)) // 保持初始渲染内容一致
+                  ? (event_date ? formatDateTime(event_date) : formatDate(album.created_at))
+                  : (event_date ? formatDateTime(event_date) : formatDate(album.created_at)) // 保持初始渲染内容一致
                 }
               </span>
             </div>

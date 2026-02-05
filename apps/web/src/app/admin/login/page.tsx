@@ -96,8 +96,19 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // 防止重复提交：如果已经在加载中，直接返回
+    if (loading) {
+      console.log('[Login] Already processing, ignoring duplicate click')
+      return
+    }
+    
+    // 立即设置加载状态，确保用户看到反馈
     setLoading(true)
     setError('')
+    
+    // 使用 requestAnimationFrame 确保 UI 更新
+    await new Promise(resolve => requestAnimationFrame(resolve))
 
     // 前端验证
     if (loginType === 'username') {
@@ -133,6 +144,7 @@ export default function LoginPage() {
 
     // 如果配置了 Turnstile，等待验证完成
     // Invisible 模式会在页面加载时自动执行验证
+    // 优化：减少等待时间，避免用户感觉没有反应
     if (hasTurnstile && !turnstileToken && !turnstileError) {
       // 计算从页面加载到现在已经过去的时间
       const timeSincePageLoad = pageLoadTimeRef.current 
@@ -140,31 +152,37 @@ export default function LoginPage() {
         : 0
       
       // Turnstile 验证从页面加载时就开始，用户输入的时间已经算在内
-      // 如果已经等待了超过 10 秒（从页面加载开始），说明 Turnstile 可能有问题，直接继续
-      if (timeSincePageLoad > 10000) {
-        console.warn('Turnstile verification timeout (over 10s since page load), proceeding with login')
+      // 如果已经等待了超过 3 秒（从页面加载开始），直接继续（进一步减少等待时间）
+      if (timeSincePageLoad > 3000) {
+        console.log('[Login] Turnstile timeout (>3s), proceeding with login')
         // 继续登录流程，让服务端处理（服务端有降级策略）
       } else {
-        // 如果页面刚加载不久，最多再等待 3 秒（因为 Turnstile 已经在后台验证了）
-        // 这样可以避免用户输入时间被算入等待时间
-        const remainingWait = Math.max(0, 3000 - timeSincePageLoad)
+        // 如果页面刚加载不久，最多再等待 500ms（大幅减少等待时间）
+        // Turnstile 通常在页面加载后很快完成验证
+        const remainingWait = Math.max(0, 500 - timeSincePageLoad)
         if (remainingWait > 0) {
+          console.log(`[Login] Waiting for Turnstile (${remainingWait}ms remaining)`)
+          // 使用更短的等待间隔，让 UI 能够及时更新
+          const waitInterval = 50 // 进一步减少到 50ms，让 UI 更流畅
           let waited = 0
           while (!turnstileToken && !turnstileError && waited < remainingWait) {
-            await new Promise((resolve) => setTimeout(resolve, 200))
-            waited += 200
+            await new Promise((resolve) => setTimeout(resolve, waitInterval))
+            waited += waitInterval
           }
         }
         
         // 如果仍然没有 token，继续登录流程（降级策略）
         if (!turnstileToken && !turnstileError) {
-          console.warn('Turnstile verification timeout, proceeding with login attempt')
+          console.log('[Login] Turnstile not ready, proceeding with login (fallback)')
+        } else {
+          console.log('[Login] Turnstile ready, proceeding with login')
         }
       }
     }
 
     try {
-
+      console.log('[Login] Starting login request')
+      
       // 获取实际邮箱（用户名登录会转换为 admin@example.com）
       const actualEmail = getEmailForLogin()
       
@@ -213,14 +231,17 @@ export default function LoginPage() {
         return
       }
 
-      // 登录成功，刷新页面以更新会话
-      router.push('/admin')
-      router.refresh()
+      // 登录成功，使用 window.location 强制刷新页面以确保 cookie 生效
+      console.log('[Login] Login successful, redirecting to admin')
+      // 使用 window.location.href 而不是 router.push，确保浏览器重新加载页面
+      // 这样可以让服务端设置的 cookie 立即生效，避免 layout 检查用户时读取不到会话
+      window.location.href = '/admin'
     } catch (err) {
-      console.error('Login error:', err)
+      console.error('[Login] Login error:', err)
       setError('登录失败，请重试')
     } finally {
       setLoading(false)
+      console.log('[Login] Login process completed')
     }
   }
 
@@ -262,9 +283,10 @@ export default function LoginPage() {
         if (response.status === 429) {
           setError(data.error?.message || '请求过于频繁，请稍后再试')
         } else if (response.status === 400 && data.error?.code === 'PASSWORD_ALREADY_SET') {
-          // 密码已设置，重新检查状态并切换到登录表单
-          setError('密码已设置，请使用登录功能')
-          await checkAdminStatus() // 重新检查状态，确保 UI 正确显示登录表单
+          // 密码已设置，静默切换到登录表单（不显示错误消息，因为这是正常状态）
+          // 重新检查状态，确保 UI 正确显示登录表单
+          await checkAdminStatus()
+          // 不设置错误消息，让用户看到登录表单即可
         } else {
           setError(data.error?.message || '密码设置失败，请重试')
         }
@@ -294,9 +316,9 @@ export default function LoginPage() {
         const loginData = await loginResponse.json()
 
         if (loginResponse.ok) {
-          // 登录成功，跳转到管理后台
-          router.push('/admin')
-          router.refresh()
+          // 登录成功，使用 window.location 强制刷新页面以确保 cookie 生效
+          console.log('[SetupPassword] Login successful after password setup, redirecting to admin')
+          window.location.href = '/admin'
         } else {
           // 登录失败，重新检查状态（密码已设置，应该显示登录表单）
           setError(loginData.error?.message || '密码已设置，但自动登录失败，请刷新页面后登录')

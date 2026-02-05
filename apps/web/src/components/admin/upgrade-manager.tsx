@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { CheckCircle2, AlertCircle, Loader2, RefreshCw, Download, Server, GitBranch, GitCommit, Clock } from 'lucide-react'
+import { CheckCircle2, AlertCircle, RefreshCw, Download, GitBranch, GitCommit, Clock, Loader2, Server } from 'lucide-react'
 import { showSuccess, handleApiError } from '@/lib/toast'
 import { cn } from '@/lib/utils'
 
@@ -22,7 +22,6 @@ interface UpgradeLog {
 }
 
 export function UpgradeManager() {
-  const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(false)
   const [upgrading, setUpgrading] = useState(false)
   const [status, setStatus] = useState<UpgradeStatus | null>(null)
@@ -109,7 +108,7 @@ export function UpgradeManager() {
               } else if (data.type === 'error') {
                 handleApiError(new Error(data.message), '升级失败')
               }
-            } catch (e) {
+            } catch {
               // 忽略解析错误
             }
           }
