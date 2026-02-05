@@ -13,11 +13,13 @@ import {
   FileText,
   CheckCircle2,
   Download,
+  Sparkles,
 } from "lucide-react";
 import { ChangePasswordForm } from "@/components/admin/change-password-form";
 import { TemplateManager } from "@/components/admin/template-manager";
 import { ConsistencyChecker } from "@/components/admin/consistency-checker";
 import { UpgradeManager } from "@/components/admin/upgrade-manager";
+import { AIRetouchSettings } from "@/components/admin/ai-retouch-settings";
 
 export default async function SettingsPage() {
   const db = await createClient();
@@ -58,6 +60,27 @@ export default async function SettingsPage() {
 
   const publicAlbumCount =
     publicAlbumCountResult.count || publicAlbumCountResult.data?.length || 0;
+
+  // 获取启用 AI 修图的相册数量
+  const aiRetouchAlbumsResult = await db
+    .from("albums")
+    .select("id")
+    .eq("enable_ai_retouch", true)
+    .is("deleted_at", null)
+    .execute();
+
+  const aiRetouchAlbumsCount =
+    aiRetouchAlbumsResult.count || aiRetouchAlbumsResult.data?.length || 0;
+
+  // 获取所有未删除的相册 ID（用于批量操作）
+  const allAlbumsResult = await db
+    .from("albums")
+    .select("id")
+    .is("deleted_at", null)
+    .execute();
+
+  const allAlbumIds =
+    (allAlbumsResult.data as Array<{ id: string }> | null)?.map((a) => a.id) || [];
 
   // 获取最近创建的相册
   const recentAlbumsResult = await db
@@ -196,6 +219,19 @@ export default async function SettingsPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* AI 修图全局设置 */}
+      <div className="card">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-accent" />
+          AI 修图全局设置
+        </h2>
+        <AIRetouchSettings
+          totalAlbums={albumCount}
+          enabledAlbums={aiRetouchAlbumsCount}
+          allAlbumIds={allAlbumIds}
+        />
       </div>
 
       {/* 模板管理 */}

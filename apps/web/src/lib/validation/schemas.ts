@@ -438,6 +438,7 @@ export const batchUpdateSchema = z.object({
     sort_rule: z.enum(['capture_desc', 'capture_asc', 'manual']).optional(),
     allow_download: z.boolean().optional(),
     show_exif: z.boolean().optional(),
+    enable_ai_retouch: z.boolean().optional(), // AI 修图开关
   }).refine((data) => Object.keys(data).length > 0, {
     message: '至少提供一个更新字段',
   }),

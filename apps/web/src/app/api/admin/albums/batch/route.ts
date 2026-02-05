@@ -116,6 +116,7 @@ export async function PATCH(request: NextRequest) {
     if (updates.sort_rule !== undefined) updateData.sort_rule = updates.sort_rule
     if (updates.allow_download !== undefined) updateData.allow_download = updates.allow_download
     if (updates.show_exif !== undefined) updateData.show_exif = updates.show_exif
+    if (updates.enable_ai_retouch !== undefined) updateData.enable_ai_retouch = updates.enable_ai_retouch
 
     // 执行批量更新
     // 优化：使用单次更新操作（使用 WHERE IN）

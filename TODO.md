@@ -323,7 +323,7 @@
 - [x] **界面**: 在相册设置中添加“AI 增强”开关。
 - [x] **参数**: 允许选择预设（如“人像模式”、“风景模式”）。
 
-### 3.3 全局设置（规划中，优先级：中）
+### 3.3 全局设置（已完成 ✅，优先级：中）
 - [ ] **系统设置页面** (`apps/web/src/app/admin/(dashboard)/settings/page.tsx`):
   - [ ] 添加“AI 修图全局设置”卡片
   - [ ] 添加全局开关，允许一键关闭/开启所有相册的 AI 修图功能
@@ -331,27 +331,28 @@
   - [ ] 提供批量操作：一键关闭所有相册的 AI 修图
 
 - [ ] **客户端组件** (`apps/web/src/components/admin/ai-retouch-settings.tsx`):
-  - [ ] 创建新的 Client Component（参考 `ConsistencyChecker` 组件结构）
-  - [ ] Props: `{ totalAlbums: number, enabledAlbums: number }`
-  - [ ] 显示统计信息：总相册数、启用 AI 修图的相册数
-  - [ ] 添加全局开关（使用 Toggle 组件，参考相册设置中的开关样式）
-  - [ ] 使用 `useState` 管理加载状态和开关状态
-  - [ ] 使用 `fetch` 调用批量更新 API：`PATCH /api/admin/albums/batch`
-  - [ ] 使用 `showSuccess` 和 `handleApiError` 处理结果
-  - [ ] 使用 `Sparkles` 图标（与相册设置保持一致）
+  - [x] 创建新的 Client Component（参考 `ConsistencyChecker` 组件结构）
+  - [x] Props: `{ totalAlbums: number, enabledAlbums: number, allAlbumIds: string[] }`
+  - [x] 显示统计信息：总相册数、启用 AI 修图的相册数、百分比
+  - [x] 添加全局开关（使用 Toggle 组件，参考相册设置中的开关样式）
+  - [x] 使用 `useState` 管理加载状态和开关状态
+  - [x] 使用 `fetch` 调用批量更新 API：`PATCH /api/admin/albums/batch`
+  - [x] 使用 `showSuccess` 和 `handleApiError` 处理结果
+  - [x] 使用 `Sparkles` 图标（与相册设置保持一致）
+  - [x] 添加空状态提示（当没有相册时）
 
-- [ ] **扩展批量更新 API** (`apps/web/src/app/api/admin/albums/batch/route.ts`):
-  - [ ] 扩展 `batchUpdateSchema` (`apps/web/src/lib/validation/schemas.ts`)：
+- [x] **扩展批量更新 API** (`apps/web/src/app/api/admin/albums/batch/route.ts`):
+  - [x] 扩展 `batchUpdateSchema` (`apps/web/src/lib/validation/schemas.ts`)：
     - 在 `updates` 对象中添加 `enable_ai_retouch: z.boolean().optional()`
-  - [ ] 扩展批量更新逻辑：
+  - [x] 扩展批量更新逻辑：
     - 在 `PATCH /api/admin/albums/batch` 中添加 `enable_ai_retouch` 字段支持
     - 使用现有的批量更新机制：`db.update('albums', updateData, { 'id[]': albumIds, deleted_at: null })`
 
-- [ ] **批量操作逻辑**:
-  - [ ] 在 Server Component 中获取所有未删除的相册 ID
-  - [ ] 在 Client Component 中调用批量更新 API：`PATCH /api/admin/albums/batch`
-  - [ ] 请求体：`{ albumIds: [...], updates: { enable_ai_retouch: true/false } }`
-  - [ ] 复用现有的批量更新机制，无需新建 API 路由
+- [x] **批量操作逻辑**:
+  - [x] 在 Server Component 中获取所有未删除的相册 ID
+  - [x] 在 Client Component 中调用批量更新 API：`PATCH /api/admin/albums/batch`
+  - [x] 请求体：`{ albumIds: [...], updates: { enable_ai_retouch: true/false } }`
+  - [x] 复用现有的批量更新机制，无需新建 API 路由
 
 **实施难度**：中（2-3天）
 **用户体验**：管理员可以在系统设置中统一管理所有相册的 AI 修图功能，无需逐个相册设置
