@@ -81,6 +81,12 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
+# 为 nextjs 用户配置 Git safe.directory（允许访问挂载的项目目录）
+# Docker 容器中，挂载目录的所有者与容器用户不同，Git 2.35.2+ 需要此配置
+RUN mkdir -p /home/nextjs && \
+    chown nextjs:nodejs /home/nextjs && \
+    su nextjs -s /bin/sh -c "git config --global --add safe.directory /opt/pis && git config --global --add safe.directory '*'"
+
 # 复制 standalone 输出（Next.js 会在 standalone 目录下保持原始路径结构）
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static

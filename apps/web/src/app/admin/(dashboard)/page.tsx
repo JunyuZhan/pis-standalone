@@ -4,6 +4,10 @@ import { AlbumList } from '@/components/admin/album-list'
 import { AlbumCardSkeleton } from '@/components/ui/skeleton'
 import type { Album, Photo } from '@/types/database'
 
+// 强制动态渲染，确保每次请求都获取最新数据
+// 解决相册删除后列表不更新的问题
+export const dynamic = 'force-dynamic'
+
 /**
  * 相册列表页 (管理后台首页)
  * 

@@ -80,16 +80,39 @@ export async function GET(request: NextRequest) {
         )
       }
 
+      // 配置 Git safe.directory（Docker 容器中必需）
+      // Git 2.35.2+ 要求明确信任非当前用户所有的目录
+      try {
+        await execAsync(`git config --global --add safe.directory ${projectRoot}`, { timeout: 5000 })
+      } catch {
+        // 配置失败不阻塞，继续尝试
+        console.warn('无法配置 Git safe.directory，继续尝试...')
+      }
+
       // 检查是否是 Git 仓库
       try {
         await execAsync('git rev-parse --git-dir', { cwd: projectRoot, timeout: 5000 })
-      } catch {
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : ''
+        // 检查是否是 safe.directory 相关错误
+        if (errorMessage.includes('dubious ownership') || errorMessage.includes('safe.directory')) {
+          return NextResponse.json(
+            {
+              error: {
+                code: 'GIT_SAFE_DIRECTORY',
+                message: 'Git 安全目录配置问题',
+                details: `请在容器中执行: git config --global --add safe.directory ${projectRoot}`,
+              },
+            },
+            { status: 400 }
+          )
+        }
         return NextResponse.json(
           {
             error: {
               code: 'NOT_A_GIT_REPO',
               message: '当前目录不是 Git 仓库',
-              details: `项目根目录 ${projectRoot} 不是有效的 Git 仓库。`,
+              details: `项目根目录 ${projectRoot} 不是有效的 Git 仓库。请确保已正确挂载项目目录。`,
             },
           },
           { status: 400 }
