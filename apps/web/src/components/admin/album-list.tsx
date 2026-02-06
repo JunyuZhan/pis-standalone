@@ -164,9 +164,26 @@ export function AlbumList({ initialAlbums }: AlbumListProps) {
           const result = await response.json()
           showSuccess(result.message || '删除成功')
 
-          // 更新本地状态
+          // 更新本地状态（立即从列表中移除）
           setAlbums((prev) => prev.filter((a) => a.id !== albumId))
+          
+          // 刷新服务器数据，确保数据同步
           router.refresh()
+          
+          // 延迟重新获取数据，确保删除操作已完全生效
+          setTimeout(async () => {
+            try {
+              const refreshResponse = await fetch('/api/admin/albums')
+              if (refreshResponse.ok) {
+                const refreshData = await refreshResponse.json()
+                if (refreshData.albums) {
+                  setAlbums(refreshData.albums)
+                }
+              }
+            } catch (error) {
+              console.error('Failed to refresh album list:', error)
+            }
+          }, 500)
         } catch (error) {
           console.error(error)
           handleApiError(error, '删除失败，请重试')
