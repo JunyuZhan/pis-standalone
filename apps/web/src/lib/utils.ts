@@ -105,31 +105,35 @@ export function getAppBaseUrl(): string {
     return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
   }
   
-  // 客户端：优先使用环境变量，否则使用当前域名
+  // 客户端：优先使用当前域名，避免使用 localhost 配置
   const envUrl = process.env.NEXT_PUBLIC_APP_URL
-  if (!envUrl) {
-    return window.location.origin
+  const currentOrigin = window.location.origin
+  const currentHost = window.location.hostname
+  
+  // 如果环境变量配置的是 localhost，但当前访问的是域名，使用当前域名
+  if (envUrl) {
+    try {
+      const url = new URL(envUrl)
+      // 如果配置的是 localhost/127.0.0.1，但当前访问的是实际域名，使用当前域名
+      if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') &&
+          currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+        return currentOrigin
+      }
+      
+      // 如果配置的域名和当前域名不匹配，且配置的是 localhost，使用当前域名
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
+        return currentOrigin
+      }
+      
+      return envUrl
+    } catch {
+      // URL 解析失败，使用当前域名
+      return currentOrigin
+    }
   }
   
-  // 开发环境：如果配置的端口和当前端口不匹配，使用当前域名
-  try {
-    const url = new URL(envUrl)
-    const currentPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
-    const currentHost = window.location.hostname
-    
-    // 如果当前是开发环境（localhost:3000），但配置的是生产端口（8080），使用当前域名
-    if ((currentHost === 'localhost' || currentHost === '127.0.0.1') &&
-        (url.hostname === 'localhost' || url.hostname === '127.0.0.1') &&
-        url.port === '8080' && 
-        (currentPort === '3000' || currentPort === '')) {
-      return window.location.origin
-    }
-    
-    return envUrl
-  } catch {
-    // URL 解析失败，使用环境变量或当前域名
-    return envUrl || window.location.origin
-  }
+  // 没有配置环境变量，使用当前域名
+  return currentOrigin
 }
 
 /**

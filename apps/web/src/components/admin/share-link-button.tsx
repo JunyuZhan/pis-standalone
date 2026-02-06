@@ -76,41 +76,77 @@ export function ShareLinkButton({
       return
     }
 
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      safeSetTimeout(() => setCopied(false), 2000)
-      // 关闭对话框，提供更好的反馈
-      safeSetTimeout(() => setOpen(false), 1500)
-    } catch {
-      console.error('复制失败:')
-      // 降级方案：使用传统复制方法
+    // 优先使用 Clipboard API（需要 HTTPS 或 localhost）
+    if (navigator.clipboard && navigator.clipboard.writeText) {
       try {
-        const textArea = document.createElement('textarea')
-        textArea.value = url
+        await navigator.clipboard.writeText(url)
+        setCopied(true)
+        safeSetTimeout(() => setCopied(false), 2000)
+        // 关闭对话框，提供更好的反馈
+        safeSetTimeout(() => setOpen(false), 1500)
+        return
+      } catch (error) {
+        console.warn('Clipboard API failed, trying fallback:', error)
+        // 继续使用降级方案
+      }
+    }
+    
+    // 降级方案：使用传统复制方法（兼容 HTTP 和非安全上下文）
+    try {
+      const textArea = document.createElement('textarea')
+      textArea.value = url
+      textArea.style.position = 'fixed'
+      textArea.style.top = '0'
+      textArea.style.left = '0'
+      textArea.style.opacity = '0'
+      textArea.style.pointerEvents = 'none'
+      textArea.setAttribute('readonly', '')
+      textArea.setAttribute('aria-hidden', 'true')
+      document.body.appendChild(textArea)
+      
+      // 兼容移动端和桌面端
+      if (navigator.userAgent.match(/ipad|iphone/i)) {
+        // iOS 需要特殊处理
+        const range = document.createRange()
+        range.selectNodeContents(textArea)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+        textArea.setSelectionRange(0, url.length)
+      } else {
+        textArea.select()
+        textArea.setSelectionRange(0, url.length)
+      }
+      
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (successful) {
+        setCopied(true)
+        safeSetTimeout(() => setCopied(false), 2000)
+        safeSetTimeout(() => setOpen(false), 1500)
+      } else {
+        // 如果 execCommand 失败，尝试选中文本让用户手动复制
         textArea.style.position = 'fixed'
-        textArea.style.top = '0'
-        textArea.style.left = '0'
-        textArea.style.opacity = '0'
-        textArea.setAttribute('readonly', '')
+        textArea.style.top = '50%'
+        textArea.style.left = '50%'
+        textArea.style.transform = 'translate(-50%, -50%)'
+        textArea.style.opacity = '1'
+        textArea.style.zIndex = '9999'
+        textArea.style.pointerEvents = 'auto'
         document.body.appendChild(textArea)
         textArea.select()
-        textArea.setSelectionRange(0, url.length) // 兼容移动端
-        
-        const successful = document.execCommand('copy')
-        document.body.removeChild(textArea)
-        
-        if (successful) {
-          setCopied(true)
-          safeSetTimeout(() => setCopied(false), 2000)
-          safeSetTimeout(() => setOpen(false), 1500)
-        } else {
-          showError('复制失败，请手动复制链接')
-        }
-      } catch (error) {
-        console.error('Fallback copy error:', error)
-        showError('复制失败，请手动复制链接')
+        showInfo('请手动复制链接（已选中）')
+        safeSetTimeout(() => {
+          if (textArea.parentNode) {
+            document.body.removeChild(textArea)
+          }
+        }, 3000)
       }
+    } catch (error) {
+      console.error('Fallback copy error:', error)
+      // 最后的降级方案：显示 URL 让用户手动复制
+      showError('复制失败，链接已显示在输入框中，请手动复制')
     }
   }
 
