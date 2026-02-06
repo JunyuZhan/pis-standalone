@@ -37,13 +37,21 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const aiFormData = new FormData()
     aiFormData.append('file', file)
     
-    const aiRes = await fetch(`${aiServiceUrl}/extract`, {
-      method: 'POST',
-      body: aiFormData,
-    })
+    let aiRes: Response
+    try {
+      aiRes = await fetch(`${aiServiceUrl}/extract`, {
+        method: 'POST',
+        body: aiFormData,
+      })
+    } catch (error) {
+      // AI 服务不可用（可能已禁用），返回空结果
+      console.warn('AI service unavailable, returning empty results:', error)
+      return NextResponse.json({ photos: [] })
+    }
     
     if (!aiRes.ok) {
-      throw new Error(`AI service error: ${aiRes.statusText}`)
+      console.warn(`AI service error: ${aiRes.statusText}`)
+      return NextResponse.json({ photos: [] })
     }
     
     const aiData = await aiRes.json()

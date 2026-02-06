@@ -35,8 +35,8 @@ volumes:
     name: pis_worker_logs
   pis_web_logs:
     name: pis_web_logs
-  pis_ai_models:
-    name: pis_ai_models
+  # pis_ai_models:  # AI 服务已禁用，volume 不再需要
+  #   name: pis_ai_models
 
 services:
   # ==================== 数据库 ====================
@@ -291,18 +291,20 @@ services:
       start_period: 60s
 
   # ==================== AI 服务 ====================
-  ai:
-    build:
-      context: ../services/ai
-      dockerfile: Dockerfile
-    container_name: pis-ai
-    ports:
-      - "8000:8000"
-    volumes:
-      - pis_ai_models:/root/.insightface/models
-    networks:
-      - pis-network
-    restart: unless-stopped
+  # AI 服务已禁用（用于节省资源）
+  # 如需启用人脸搜索功能，请取消下面的注释
+  # ai:
+  #   build:
+  #     context: ../services/ai
+  #     dockerfile: Dockerfile
+  #   container_name: pis-ai
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - pis_ai_models:/root/.insightface/models
+  #   networks:
+  #     - pis-network
+  #   restart: unless-stopped
 
   # ==================== Nginx ====================
   nginx:
