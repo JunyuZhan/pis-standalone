@@ -1438,6 +1438,21 @@ export function AlbumDetailClient({ album, initialPhotos, mediaUrl: serverMediaU
                   查看全部照片
                 </button>
              </div>
+          ) : showDeleted ? (
+            /* 回收站空状态 */
+            <div className="space-y-4">
+              <Archive className="w-16 h-16 text-text-muted mx-auto mb-4" />
+              <h2 className="text-xl font-medium mb-2">回收站为空</h2>
+              <p className="text-text-secondary mb-6">
+                没有已删除的照片
+              </p>
+              <button
+                onClick={() => setShowDeleted(false)}
+                className="btn-secondary"
+              >
+                返回相册
+              </button>
+            </div>
           ) : !showUploader ? (
             /* 空状态 - 只在没有照片且上传组件未显示时显示 */
             <div className="space-y-4">
