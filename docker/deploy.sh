@@ -486,8 +486,9 @@ generate_config() {
             # 检查必需变量是否存在，如果缺失则补充
             local need_update=0
             
-            # 检查 AUTH_JWT_SECRET
-            if ! grep -q "^AUTH_JWT_SECRET=" "$env_target" 2>/dev/null || [ -z "$auth_jwt_secret" ]; then
+            # 检查 AUTH_JWT_SECRET（重新读取，确保获取最新值）
+            local auth_jwt_secret_check=$(grep '^AUTH_JWT_SECRET=' "$env_target" 2>/dev/null | cut -d'=' -f2 | xargs)
+            if ! grep -q "^AUTH_JWT_SECRET=" "$env_target" 2>/dev/null || [ -z "$auth_jwt_secret_check" ]; then
                 echo -e "${YELLOW}⚠️  检测到缺失 AUTH_JWT_SECRET，将自动生成${NC}"
                 if [ -z "$AUTH_JWT_SECRET" ]; then
                     AUTH_JWT_SECRET=$(generate_secret)
