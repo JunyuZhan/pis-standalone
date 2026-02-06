@@ -861,6 +861,61 @@ WHERE code IN (
 )
 ON CONFLICT (role, permission_id) DO NOTHING;
 
+-- ============================================
+-- 相册协作者表
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS album_collaborators (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    album_id UUID NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL DEFAULT 'editor',
+    can_upload BOOLEAN DEFAULT true,
+    can_edit BOOLEAN DEFAULT true,
+    can_delete BOOLEAN DEFAULT false,
+    can_manage BOOLEAN DEFAULT false,
+    can_invite BOOLEAN DEFAULT false,
+    invited_by UUID REFERENCES users(id),
+    invited_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    accepted_at TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(album_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_album_collaborators_album ON album_collaborators(album_id);
+CREATE INDEX IF NOT EXISTS idx_album_collaborators_user ON album_collaborators(user_id);
+CREATE INDEX IF NOT EXISTS idx_album_collaborators_status ON album_collaborators(status);
+
+COMMENT ON TABLE album_collaborators IS '相册协作者表';
+
+-- 协作邀请表
+CREATE TABLE IF NOT EXISTS collaboration_invites (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    album_id UUID NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    invite_type VARCHAR(20) NOT NULL DEFAULT 'email',
+    email VARCHAR(255),
+    invite_code VARCHAR(32) UNIQUE,
+    role VARCHAR(50) DEFAULT 'editor',
+    can_upload BOOLEAN DEFAULT true,
+    can_edit BOOLEAN DEFAULT true,
+    can_delete BOOLEAN DEFAULT false,
+    can_manage BOOLEAN DEFAULT false,
+    can_invite BOOLEAN DEFAULT false,
+    invited_by UUID NOT NULL REFERENCES users(id),
+    status VARCHAR(20) DEFAULT 'pending',
+    expires_at TIMESTAMP WITH TIME ZONE,
+    used_at TIMESTAMP WITH TIME ZONE,
+    used_by UUID REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_collaboration_invites_album ON collaboration_invites(album_id);
+CREATE INDEX IF NOT EXISTS idx_collaboration_invites_code ON collaboration_invites(invite_code);
+
+COMMENT ON TABLE collaboration_invites IS '协作邀请表';
+
 -- 初始化完成提示
 -- ============================================
 DO $$
@@ -887,6 +942,8 @@ BEGIN
     RAISE NOTICE '   - permissions 表: 权限定义';
     RAISE NOTICE '   - role_permissions 表: 角色权限';
     RAISE NOTICE '   - user_permissions 表: 用户特殊权限';
+    RAISE NOTICE '   - album_collaborators 表: 相册协作者';
+    RAISE NOTICE '   - collaboration_invites 表: 协作邀请';
     RAISE NOTICE '';
     RAISE NOTICE '👤 默认用户账户:';
     RAISE NOTICE '   - 管理员: admin@pis.com';
