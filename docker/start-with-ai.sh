@@ -64,9 +64,25 @@ fi
 
 # 确保 Docker Compose 能找到 .env 文件（创建符号链接）
 # Docker Compose 在解析变量时会在当前目录查找 .env 文件
-if [ ! -f ".env" ] && [ -f "../.env" ]; then
-    echo -e "${CYAN}创建 .env 符号链接以便 Docker Compose 读取...${NC}"
-    ln -sf ../.env .env
+if [ -f "../.env" ]; then
+    # 检查是否需要创建或更新符号链接
+    need_link=true
+    if [ -L ".env" ]; then
+        # 检查现有符号链接是否指向正确位置
+        current_target=$(readlink .env 2>/dev/null || echo "")
+        if [ "$current_target" = "../.env" ]; then
+            need_link=false
+        fi
+    elif [ -f ".env" ]; then
+        # .env 存在但不是符号链接，需要删除后重新创建
+        echo -e "${YELLOW}警告: docker/.env 已存在但不是符号链接，将删除并重新创建${NC}"
+        rm -f .env
+    fi
+    
+    if [ "$need_link" = true ]; then
+        echo -e "${CYAN}创建/更新 .env 符号链接以便 Docker Compose 读取...${NC}"
+        ln -sf ../.env .env
+    fi
 fi
 
 echo -e "${CYAN}正在启动服务（包含 AI 服务）...${NC}"

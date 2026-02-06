@@ -1678,10 +1678,26 @@ main() {
         
         # 确保 Docker Compose 能找到 .env 文件（创建符号链接）
         # Docker Compose 在解析变量时会在当前目录查找 .env 文件
-        if [ ! -f ".env" ] && [ -f "../.env" ]; then
-            echo -e "${CYAN}创建 .env 符号链接以便 Docker Compose 读取...${NC}"
-            ln -sf ../.env .env
-            print_success ".env 符号链接已创建"
+        if [ -f "../.env" ]; then
+            # 检查是否需要创建或更新符号链接
+            local need_link=true
+            if [ -L ".env" ]; then
+                # 检查现有符号链接是否指向正确位置
+                local current_target=$(readlink .env 2>/dev/null || echo "")
+                if [ "$current_target" = "../.env" ]; then
+                    need_link=false
+                fi
+            elif [ -f ".env" ]; then
+                # .env 存在但不是符号链接，需要删除后重新创建
+                echo -e "${YELLOW}警告: docker/.env 已存在但不是符号链接，将删除并重新创建${NC}"
+                rm -f .env
+            fi
+            
+            if [ "$need_link" = true ]; then
+                echo -e "${CYAN}创建/更新 .env 符号链接以便 Docker Compose 读取...${NC}"
+                ln -sf ../.env .env
+                print_success ".env 符号链接已创建/更新"
+            fi
         fi
         
         # 检查是否有旧容器冲突（所有容器都使用 pis- 前缀）
