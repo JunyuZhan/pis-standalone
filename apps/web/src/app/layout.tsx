@@ -170,10 +170,37 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={`dark ${inter.variable} ${notoSerifSC.variable} ${playfairDisplay.variable}`}
+      className={`${inter.variable} ${notoSerifSC.variable} ${playfairDisplay.variable}`}
       data-scroll-behavior="smooth"
+      suppressHydrationWarning
     >
       <head>
+        {/* 主题初始化脚本（防止闪烁） */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var theme = localStorage.getItem('pis-theme') || 'system';
+                  var resolved = theme;
+                  if (theme === 'system') {
+                    resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                  }
+                  document.documentElement.classList.add(resolved);
+                  
+                  var color = localStorage.getItem('pis-primary-color') || '#4F46E5';
+                  var hex = color.replace('#', '');
+                  var r = parseInt(hex.substring(0, 2), 16);
+                  var g = parseInt(hex.substring(2, 4), 16);
+                  var b = parseInt(hex.substring(4, 6), 16);
+                  document.documentElement.style.setProperty('--color-accent', r + ' ' + g + ' ' + b);
+                } catch (e) {
+                  document.documentElement.classList.add('dark');
+                }
+              })();
+            `,
+          }}
+        />
         {/* 性能优化：DNS 预解析和预连接 */}
         {mediaHost && (
           <>

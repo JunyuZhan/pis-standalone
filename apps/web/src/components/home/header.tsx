@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { Settings } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { LanguageSwitcher } from '@/components/ui/language-switcher'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 export function HomeHeader() {
   const t = useTranslations('nav')
@@ -37,7 +38,8 @@ export function HomeHeader() {
             </span>
           </div>
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
+          <ThemeToggle size="sm" className="opacity-60 hover:opacity-100" />
           <LanguageSwitcher />
           <Link 
             href="/admin" 

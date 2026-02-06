@@ -9,23 +9,24 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: '#050505',
+        // 使用 CSS 变量实现动态主题切换
+        background: 'rgb(var(--color-background) / <alpha-value>)',
         surface: {
-          DEFAULT: '#0a0a0a',
-          elevated: '#111111',
+          DEFAULT: 'rgb(var(--color-surface) / <alpha-value>)',
+          elevated: 'rgb(var(--color-surface-elevated) / <alpha-value>)',
         },
         border: {
-          DEFAULT: '#1a1a1a',
-          light: '#222222',
+          DEFAULT: 'rgb(var(--color-border) / <alpha-value>)',
+          light: 'rgb(var(--color-border-light) / <alpha-value>)',
         },
         accent: {
-          DEFAULT: '#D4AF37',
-          hover: '#E5C158',
+          DEFAULT: 'rgb(var(--color-accent) / <alpha-value>)',
+          hover: 'rgb(var(--color-accent-hover) / <alpha-value>)',
         },
         text: {
-          primary: '#ffffff',
-          secondary: '#888888',
-          muted: '#555555',
+          primary: 'rgb(var(--color-text-primary) / <alpha-value>)',
+          secondary: 'rgb(var(--color-text-secondary) / <alpha-value>)',
+          muted: 'rgb(var(--color-text-muted) / <alpha-value>)',
         },
       },
       fontFamily: {

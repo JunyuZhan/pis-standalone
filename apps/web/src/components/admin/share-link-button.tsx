@@ -576,6 +576,9 @@ export function ShareLinkButton({
         onPreview={handlePreviewPoster}
         onGenerate={() => handleGeneratePoster(true)}
         generating={generatingPoster}
+        albumTitle={albumTitle}
+        albumDescription={albumDescription || undefined}
+        coverImage={backgroundImageUrl || undefined}
       />
 
       {/* 海报预览对话框 */}

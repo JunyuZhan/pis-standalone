@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'sonner'
 import { useState } from 'react'
 import { SettingsProvider } from '@/hooks/use-settings'
+import { ThemeProvider } from './theme-provider'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -27,15 +28,17 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SettingsProvider>
-        {children}
-        <Toaster 
-          position="top-center"
-          richColors
-          closeButton
-          duration={3000}
-        />
-      </SettingsProvider>
+      <ThemeProvider>
+        <SettingsProvider>
+          {children}
+          <Toaster 
+            position="top-center"
+            richColors
+            closeButton
+            duration={3000}
+          />
+        </SettingsProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   )
 }

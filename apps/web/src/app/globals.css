@@ -3,10 +3,43 @@
 @tailwind utilities;
 
 @layer base {
+  /* 暗色主题（默认） */
   :root {
-    --background: 5 5 5;
-    --surface: 10 10 10;
-    --accent: 212 175 55;
+    --color-background: 5 5 5;
+    --color-surface: 10 10 10;
+    --color-surface-elevated: 17 17 17;
+    --color-border: 26 26 26;
+    --color-border-light: 34 34 34;
+    --color-accent: 79 70 229; /* #4F46E5 默认靛蓝色 */
+    --color-accent-hover: 59 50 209;
+    --color-text-primary: 255 255 255;
+    --color-text-secondary: 136 136 136;
+    --color-text-muted: 85 85 85;
+  }
+
+  /* 亮色主题 */
+  .light {
+    --color-background: 255 255 255;
+    --color-surface: 249 250 251;
+    --color-surface-elevated: 243 244 246;
+    --color-border: 229 231 235;
+    --color-border-light: 209 213 219;
+    --color-text-primary: 17 24 39;
+    --color-text-secondary: 107 114 128;
+    --color-text-muted: 156 163 175;
+    /* accent 颜色保持用户选择的值 */
+  }
+
+  /* 暗色主题（显式定义） */
+  .dark {
+    --color-background: 5 5 5;
+    --color-surface: 10 10 10;
+    --color-surface-elevated: 17 17 17;
+    --color-border: 26 26 26;
+    --color-border-light: 34 34 34;
+    --color-text-primary: 255 255 255;
+    --color-text-secondary: 136 136 136;
+    --color-text-muted: 85 85 85;
   }
 
   html {

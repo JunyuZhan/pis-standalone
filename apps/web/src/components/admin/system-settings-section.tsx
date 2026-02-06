@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { showSuccess, handleApiError } from '@/lib/toast'
 import { cn } from '@/lib/utils'
+import { useTheme } from '@/components/theme-provider'
 
 interface SettingsFormData {
   // 品牌
@@ -73,6 +74,9 @@ export function SystemSettingsSection() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<SectionId>>(new Set(['brand']))
+  
+  // 获取主题控制钩子
+  const { setTheme, setPrimaryColor } = useTheme()
 
   // 获取设置
   const fetchSettings = useCallback(async () => {
@@ -182,6 +186,14 @@ export function SystemSettingsSection() {
 
       showSuccess('设置已保存')
       setInitialData(formData)
+      
+      // 同步主题设置到 ThemeProvider
+      if ('theme_mode' in updates) {
+        setTheme(formData.theme_mode as 'light' | 'dark' | 'system')
+      }
+      if ('theme_primary_color' in updates) {
+        setPrimaryColor(formData.theme_primary_color)
+      }
     } catch (error) {
       handleApiError(error, '保存设置失败')
     } finally {

@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Sparkles } from 'lucide-react'
+import { X, Sparkles, Eye } from 'lucide-react'
 import type { PosterStyle } from '@/lib/poster-generator'
 import { POSTER_PRESETS, validateAndLimitStyle } from '@/lib/poster-generator'
 import { cn } from '@/lib/utils'
+import { PosterPreview, PosterTemplatePreview } from './poster-preview'
 
 interface PosterConfigDialogProps {
   open: boolean
@@ -14,6 +15,9 @@ interface PosterConfigDialogProps {
   onPreview: () => void
   onGenerate: () => void
   generating: boolean
+  albumTitle?: string
+  albumDescription?: string
+  coverImage?: string
 }
 
 export function PosterConfigDialog({
@@ -24,8 +28,12 @@ export function PosterConfigDialog({
   onPreview,
   onGenerate,
   generating,
+  albumTitle = '相册标题',
+  albumDescription = '相册描述',
+  coverImage,
 }: PosterConfigDialogProps) {
   const [selectedPreset, setSelectedPreset] = useState<string | null>(null)
+  const [showLivePreview, setShowLivePreview] = useState(false)
 
   if (!open) return null
 
@@ -46,85 +54,61 @@ export function PosterConfigDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-background rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto m-4">
+      <div className="bg-background rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto m-4">
         {/* 头部 */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-lg font-semibold">海报样式设置</h2>
-          <button
-            onClick={onClose}
-            className="p-1 hover:bg-surface-elevated rounded transition-colors"
-            aria-label="关闭"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowLivePreview(!showLivePreview)}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors',
+                showLivePreview
+                  ? 'bg-accent text-white'
+                  : 'bg-surface-elevated text-text-secondary hover:text-text-primary'
+              )}
+            >
+              <Eye className="w-4 h-4" />
+              实时预览
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1 hover:bg-surface-elevated rounded transition-colors"
+              aria-label="关闭"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* 内容 */}
-        <div className="p-6 space-y-6">
-          {/* 预设模板 */}
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-3">
-              <Sparkles className="w-4 h-4 inline mr-1" />
-              快速选择模板
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              {Object.entries(POSTER_PRESETS).map(([name, preset]) => (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => applyPreset(name)}
-                  className={cn(
-                    'p-3 rounded-lg border-2 transition-colors text-left',
-                    selectedPreset === name
-                      ? 'border-accent bg-accent/10'
-                      : 'border-border hover:border-accent/50'
-                  )}
-                >
-                  {/* 预设预览缩略图 */}
-                  <div className="relative w-full h-24 mb-2 rounded overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900">
-                    {/* 模拟海报布局 */}
-                    <div 
-                      className="absolute inset-0 flex flex-col p-2"
-                      style={{
-                        justifyContent: preset.layout === 'top' ? 'flex-start' : 
-                                       preset.layout === 'bottom' ? 'flex-end' : 'center',
-                      }}
-                    >
-                      <div className="text-white text-xs font-bold truncate opacity-90">相册标题</div>
-                      <div className="text-white/60 text-[8px] truncate">相册描述文字</div>
-                    </div>
-                    {/* 模拟二维码位置 */}
-                    <div 
-                      className={cn(
-                        "absolute bottom-1 w-4 h-4 bg-white rounded-sm",
-                        preset.qrPosition === 'bottom-center' && "left-1/2 -translate-x-1/2",
-                        preset.qrPosition === 'bottom-left' && "left-1",
-                        preset.qrPosition === 'bottom-right' && "right-1"
-                      )}
-                    />
-                    {/* 遮罩层指示 */}
-                    <div 
-                      className="absolute inset-0 bg-black pointer-events-none"
-                      style={{ opacity: (preset.overlayOpacity || 0.4) * 0.5 }}
-                    />
-                  </div>
-                  <div className="font-medium text-sm">
-                    {name === 'classic' ? '经典' : 
-                     name === 'minimal' ? '简约' :
-                     name === 'elegant' ? '优雅' : '商务'}
-                  </div>
-                  <div className="text-xs text-text-muted mt-0.5">
-                    {name === 'classic' ? '居中布局，白色文字' : 
-                     name === 'minimal' ? '顶部布局，高对比度' :
-                     name === 'elegant' ? '底部布局，柔和色调' : '居中布局，专业配色'}
-                  </div>
-                </button>
-              ))}
+        <div className="flex">
+          {/* 左侧：设置面板 */}
+          <div className={cn(
+            "p-6 space-y-6 overflow-y-auto",
+            showLivePreview ? "w-1/2 border-r border-border" : "w-full"
+          )}>
+            {/* 预设模板 */}
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-3">
+                <Sparkles className="w-4 h-4 inline mr-1" />
+                快速选择模板
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {Object.entries(POSTER_PRESETS).map(([name, preset]) => (
+                  <PosterTemplatePreview
+                    key={name}
+                    presetName={name}
+                    preset={preset}
+                    selected={selectedPreset === name}
+                    onClick={() => applyPreset(name)}
+                  />
+                ))}
+              </div>
+              <p className="text-xs text-text-muted mt-2">
+                选择模板后可以继续自定义调整
+              </p>
             </div>
-            <p className="text-xs text-text-muted mt-2">
-              选择模板后可以继续自定义调整
-            </p>
-          </div>
 
           {/* 布局选项 */}
           <div>
@@ -314,6 +298,25 @@ export function PosterConfigDialog({
               className="w-full"
             />
           </div>
+          </div>
+
+          {/* 右侧：实时预览面板 */}
+          {showLivePreview && (
+            <div className="w-1/2 p-6 flex flex-col items-center justify-center bg-surface">
+              <h3 className="text-sm font-medium text-text-secondary mb-4">实时预览</h3>
+              <PosterPreview
+                style={style}
+                title={albumTitle}
+                description={albumDescription}
+                backgroundImage={coverImage}
+                size="lg"
+                className="shadow-xl"
+              />
+              <p className="text-xs text-text-muted mt-4 text-center">
+                预览效果仅供参考，实际海报会使用相册封面作为背景
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 底部按钮 */}
