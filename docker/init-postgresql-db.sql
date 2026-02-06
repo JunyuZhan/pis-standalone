@@ -757,6 +757,110 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DE
 
 COMMENT ON TABLE audit_logs IS '操作日志表，记录系统中的关键操作';
 
+-- ============================================
+-- 权限定义表
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS permissions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code VARCHAR(100) NOT NULL UNIQUE,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    category VARCHAR(50) NOT NULL,
+    is_system BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_permissions_code ON permissions(code);
+CREATE INDEX IF NOT EXISTS idx_permissions_category ON permissions(category);
+
+COMMENT ON TABLE permissions IS '权限定义表';
+
+-- 角色权限关联表
+CREATE TABLE IF NOT EXISTS role_permissions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    role VARCHAR(50) NOT NULL,
+    permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    granted_by UUID REFERENCES users(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(role, permission_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_role_permissions_role ON role_permissions(role);
+
+COMMENT ON TABLE role_permissions IS '角色权限关联表';
+
+-- 用户特殊权限表
+CREATE TABLE IF NOT EXISTS user_permissions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    granted BOOLEAN DEFAULT true,
+    granted_by UUID REFERENCES users(id),
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, permission_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id);
+
+COMMENT ON TABLE user_permissions IS '用户特殊权限表';
+
+-- 插入系统内置权限
+INSERT INTO permissions (code, name, description, category, is_system) VALUES
+    ('album:view', '查看相册', '查看相册列表和详情', 'album', true),
+    ('album:create', '创建相册', '创建新相册', 'album', true),
+    ('album:edit', '编辑相册', '编辑相册信息和设置', 'album', true),
+    ('album:delete', '删除相册', '删除相册', 'album', true),
+    ('album:publish', '发布相册', '公开或取消公开相册', 'album', true),
+    ('album:share', '分享相册', '生成分享链接和海报', 'album', true),
+    ('photo:view', '查看照片', '查看照片列表和详情', 'photo', true),
+    ('photo:upload', '上传照片', '上传新照片', 'photo', true),
+    ('photo:edit', '编辑照片', '编辑照片信息', 'photo', true),
+    ('photo:delete', '删除照片', '删除照片', 'photo', true),
+    ('photo:download', '下载照片', '下载原图', 'photo', true),
+    ('photo:retouch', '修图', 'AI 修图功能', 'photo', true),
+    ('customer:view', '查看客户', '查看客户列表和详情', 'customer', true),
+    ('customer:create', '创建客户', '创建新客户', 'customer', true),
+    ('customer:edit', '编辑客户', '编辑客户信息', 'customer', true),
+    ('customer:delete', '删除客户', '删除客户', 'customer', true),
+    ('customer:notify', '发送通知', '向客户发送通知', 'customer', true),
+    ('analytics:view', '查看统计', '查看数据统计', 'analytics', true),
+    ('analytics:export', '导出统计', '导出统计报表', 'analytics', true),
+    ('system:settings', '系统设置', '修改系统设置', 'system', true),
+    ('system:upgrade', '系统升级', '执行系统升级', 'system', true),
+    ('system:users', '用户管理', '管理系统用户', 'system', true),
+    ('system:permissions', '权限管理', '管理用户权限', 'system', true),
+    ('system:audit', '审计日志', '查看操作日志', 'system', true),
+    ('system:backup', '数据备份', '执行数据备份', 'system', true)
+ON CONFLICT (code) DO NOTHING;
+
+-- 管理员拥有所有权限
+INSERT INTO role_permissions (role, permission_id)
+SELECT 'admin', id FROM permissions
+ON CONFLICT (role, permission_id) DO NOTHING;
+
+-- 摄影师权限
+INSERT INTO role_permissions (role, permission_id)
+SELECT 'photographer', id FROM permissions 
+WHERE code IN (
+    'album:view', 'album:create', 'album:edit', 'album:publish', 'album:share',
+    'photo:view', 'photo:upload', 'photo:edit', 'photo:delete', 'photo:download',
+    'customer:view', 'customer:create', 'customer:edit', 'customer:notify',
+    'analytics:view'
+)
+ON CONFLICT (role, permission_id) DO NOTHING;
+
+-- 修图师权限
+INSERT INTO role_permissions (role, permission_id)
+SELECT 'retoucher', id FROM permissions 
+WHERE code IN (
+    'album:view',
+    'photo:view', 'photo:edit', 'photo:retouch', 'photo:download'
+)
+ON CONFLICT (role, permission_id) DO NOTHING;
+
 -- 初始化完成提示
 -- ============================================
 DO $$
@@ -780,6 +884,9 @@ BEGIN
     RAISE NOTICE '   - custom_translations 表: 存储自定义翻译';
     RAISE NOTICE '   - style_templates 表: 存储自定义样式模板';
     RAISE NOTICE '   - audit_logs 表: 存储操作日志';
+    RAISE NOTICE '   - permissions 表: 权限定义';
+    RAISE NOTICE '   - role_permissions 表: 角色权限';
+    RAISE NOTICE '   - user_permissions 表: 用户特殊权限';
     RAISE NOTICE '';
     RAISE NOTICE '👤 默认用户账户:';
     RAISE NOTICE '   - 管理员: admin@pis.com';

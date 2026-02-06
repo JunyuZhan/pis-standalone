@@ -18,6 +18,7 @@ import {
   Languages,
   Palette,
   ScrollText,
+  Shield,
 } from "lucide-react";
 import { ChangePasswordForm } from "@/components/admin/change-password-form";
 import { TemplateManager } from "@/components/admin/template-manager";
@@ -326,6 +327,24 @@ export default async function SettingsPage() {
         >
           <p className="font-medium">审计日志查看器</p>
           <p className="text-sm text-text-muted">搜索、筛选和导出系统操作记录</p>
+        </a>
+      </div>
+
+      {/* 权限管理 */}
+      <div className="card">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-accent" />
+          权限管理
+        </h2>
+        <p className="text-sm text-text-muted mb-4">
+          配置角色权限，控制不同用户的操作范围
+        </p>
+        <a
+          href="/admin/settings/permissions"
+          className="block p-3 bg-surface rounded-lg hover:bg-surface-elevated transition-colors cursor-pointer"
+        >
+          <p className="font-medium">角色权限配置</p>
+          <p className="text-sm text-text-muted">管理摄影师、修图师、查看者的权限</p>
         </a>
       </div>
 
