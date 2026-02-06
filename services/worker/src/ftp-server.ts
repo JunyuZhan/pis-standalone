@@ -119,8 +119,9 @@ class PISFileSystem extends FileSystem {
     // Call super to handle the actual file writing to local temp dir
     const stream = super.write(fileName, { append, start });
 
-    // Get absolute path
-    const { fsPath } = (this as any).resolvePath(fileName);
+    // Get absolute path - 直接使用 root + fileName 构建路径
+    const cleanFileName = fileName.startsWith("/") ? fileName.slice(1) : fileName;
+    const fsPath = join(this.root, cleanFileName);
 
     // Listen for finish/close event
     stream.once("close", async () => {
