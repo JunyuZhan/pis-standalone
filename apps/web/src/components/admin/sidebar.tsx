@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { Camera, Images, Settings, LogOut, Home, Brush, Users } from 'lucide-react'
+import { Camera, Images, Settings, LogOut, Home, Brush, Users, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AuthUser } from '@/lib/auth'
 
@@ -26,6 +26,7 @@ const navItems: Array<{
   roles?: UserRole[] // 允许访问的角色，如果未指定则所有角色都可以访问
 }> = [
   { href: '/admin', label: '相册管理', icon: Images }, // 所有角色都可以访问
+  { href: '/admin/analytics', label: '数据统计', icon: BarChart3, roles: ['admin'] }, // 仅管理员
   { href: '/admin/retouch', label: '修图工作台', icon: Brush, roles: ['admin', 'retoucher'] }, // 仅管理员和修图师
   { href: '/admin/users', label: '用户管理', icon: Users, roles: ['admin'] }, // 仅管理员
   { href: '/admin/settings', label: '系统设置', icon: Settings, roles: ['admin'] }, // 仅管理员

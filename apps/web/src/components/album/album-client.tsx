@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl'
 import { MasonryGrid } from './masonry'
 import { Loader2, ImageIcon, RefreshCw, X, ScanFace } from 'lucide-react'
 import { usePhotoRealtime } from '@/hooks/use-photo-realtime'
+import { useTrackAlbumView } from '@/hooks/use-analytics'
 import type { Album, Photo } from '@/types/database'
 import type { LayoutMode } from './layout-toggle'
 
@@ -39,6 +40,9 @@ export function AlbumClient({ album, initialPhotos, layout = 'masonry' }: AlbumC
   const searchMode = searchParams.get('search')
   const queryClient = useQueryClient()
   const t = useTranslations('album')
+  
+  // 追踪相册访问
+  useTrackAlbumView(album.id)
   
   // 新照片计数
   const [newPhotoCount, setNewPhotoCount] = useState(0)

@@ -465,6 +465,84 @@ INSERT INTO system_settings (key, value, category, description, is_public) VALUE
 ON CONFLICT (key) DO NOTHING;
 
 -- ============================================
+-- 数据统计表
+-- ============================================
+
+-- 相册访问记录表
+CREATE TABLE IF NOT EXISTS album_views (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    album_id UUID NOT NULL REFERENCES albums(id) ON DELETE CASCADE,
+    viewer_ip VARCHAR(45),                       -- IPv4/IPv6 地址
+    viewer_ua TEXT,                              -- User-Agent
+    viewer_referer TEXT,                         -- 来源页面
+    viewer_country VARCHAR(100),                 -- 国家/地区
+    viewer_city VARCHAR(100),                    -- 城市
+    device_type VARCHAR(20),                     -- 设备类型: desktop, mobile, tablet
+    browser VARCHAR(50),                         -- 浏览器
+    os VARCHAR(50),                              -- 操作系统
+    session_id VARCHAR(100),                     -- 会话标识
+    viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_album_views_album_id ON album_views(album_id);
+CREATE INDEX IF NOT EXISTS idx_album_views_viewed_at ON album_views(viewed_at);
+CREATE INDEX IF NOT EXISTS idx_album_views_session ON album_views(album_id, session_id);
+
+-- 照片查看记录表
+CREATE TABLE IF NOT EXISTS photo_views (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    photo_id UUID NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    album_id UUID REFERENCES albums(id) ON DELETE SET NULL,
+    viewer_ip VARCHAR(45),
+    session_id VARCHAR(100),
+    viewed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_photo_views_photo_id ON photo_views(photo_id);
+CREATE INDEX IF NOT EXISTS idx_photo_views_album_id ON photo_views(album_id);
+CREATE INDEX IF NOT EXISTS idx_photo_views_viewed_at ON photo_views(viewed_at);
+
+-- 下载记录表
+CREATE TABLE IF NOT EXISTS download_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    photo_id UUID REFERENCES photos(id) ON DELETE SET NULL,
+    album_id UUID REFERENCES albums(id) ON DELETE SET NULL,
+    download_type VARCHAR(20) NOT NULL,          -- single, batch, all
+    file_count INTEGER DEFAULT 1,
+    total_size BIGINT,
+    downloader_ip VARCHAR(45),
+    session_id VARCHAR(100),
+    downloaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_download_logs_photo_id ON download_logs(photo_id);
+CREATE INDEX IF NOT EXISTS idx_download_logs_album_id ON download_logs(album_id);
+CREATE INDEX IF NOT EXISTS idx_download_logs_downloaded_at ON download_logs(downloaded_at);
+
+-- 每日统计汇总表
+CREATE TABLE IF NOT EXISTS daily_stats (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    stat_date DATE NOT NULL,
+    album_id UUID REFERENCES albums(id) ON DELETE CASCADE,
+    view_count INTEGER DEFAULT 0,
+    unique_visitors INTEGER DEFAULT 0,
+    photo_view_count INTEGER DEFAULT 0,
+    download_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(stat_date, album_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(stat_date);
+CREATE INDEX IF NOT EXISTS idx_daily_stats_album ON daily_stats(album_id);
+
+DROP TRIGGER IF EXISTS update_daily_stats_updated_at ON daily_stats;
+CREATE TRIGGER update_daily_stats_updated_at
+    BEFORE UPDATE ON daily_stats
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
 -- 初始化完成提示
 -- ============================================
 DO $$

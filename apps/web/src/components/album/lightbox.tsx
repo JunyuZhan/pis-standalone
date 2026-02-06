@@ -11,6 +11,7 @@ import { Download, Heart, RotateCw, RotateCcw, Share2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { cn, getSafeMediaUrl } from '@/lib/utils'
 import { handleApiError, showSuccess } from '@/lib/toast'
+import { usePhotoViewTracker, trackDownload } from '@/hooks/use-analytics'
 import type { Photo } from '@/types/database'
 
 interface PhotoLightboxProps {
@@ -61,6 +62,9 @@ export function PhotoLightbox({
   // 移除此逻辑，现在默认只显示大预览图，下载时才获取原图
   // const [loadedOriginals, setLoadedOriginals] = useState<Set<string>>(new Set())
   const prevIndexRef = useRef(index)
+  
+  // 照片查看追踪
+  const { trackPhotoView } = usePhotoViewTracker(photos[0]?.album_id)
 
   // 预加载相邻图片（只在 Lightbox 打开时预加载）
   const preloadImage = useCallback((imageSrc: string) => {
@@ -96,6 +100,12 @@ export function PhotoLightbox({
     if (validIndex !== prevIndexRef.current) {
       prevIndexRef.current = validIndex
       setCurrentIndex(validIndex)
+      
+      // 追踪照片查看
+      const currentPhoto = photos[validIndex]
+      if (currentPhoto) {
+        trackPhotoView(currentPhoto.id)
+      }
       
       // 预加载前一张和后一张图片
       if (photos.length > 0) {
@@ -282,10 +292,20 @@ export function PhotoLightbox({
       
       // 释放 Blob URL
       URL.revokeObjectURL(blobUrl)
+      
+      // 追踪下载事件
+      const currentPhoto = photos[currentIndex]
+      trackDownload({
+        photoId: currentPhotoId,
+        albumId: currentPhoto?.album_id,
+        downloadType: 'single',
+        fileCount: 1,
+        totalSize: blob.size,
+      })
     } catch (error) {
       handleApiError(error, '下载失败，请重试')
     }
-  }, [currentPhotoId])
+  }, [currentPhotoId, currentIndex, photos])
 
   // 选片功能
   const handleSelect = useCallback(async () => {
