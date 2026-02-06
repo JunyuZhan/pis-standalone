@@ -9,10 +9,17 @@ import { StylePresetSelector } from './style-preset-selector'
 import { StorageChecker } from './storage-checker'
 import { TemplateSelector } from './template-selector'
 import { CustomerSelector } from './customer-selector'
+import { TranslationEditor } from './translation-editor'
 import { showSuccess, handleApiError } from '@/lib/toast'
 import { getSafeMediaUrl, getFtpServerHost, getFtpServerPort } from '@/lib/utils'
 
-type Album = Database['public']['Tables']['albums']['Row']
+type Album = Database['public']['Tables']['albums']['Row'] & {
+  // 多语言字段（可能不存在于旧数据中）
+  title_translations?: Record<string, string> | null
+  description_translations?: Record<string, string> | null
+  share_title_translations?: Record<string, string> | null
+  share_description_translations?: Record<string, string> | null
+}
 
 interface AlbumSettingsFormProps {
   album: Album
@@ -145,6 +152,11 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
     color_grading: initialStylePresetId,
     // 模板配置
     template_id: initialTemplateId,
+    // 多语言翻译
+    title_translations: album.title_translations || null,
+    description_translations: album.description_translations || null,
+    share_title_translations: album.share_title_translations || null,
+    share_description_translations: album.share_description_translations || null,
   })
 
   // 获取默认水印配置（单个水印对象）
@@ -170,7 +182,7 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
     }
   }
 
-  const handleChange = (field: string, value: string | boolean | number | Record<string, unknown> | null) => {
+  const handleChange = (field: string, value: string | boolean | number | Record<string, unknown> | Record<string, string> | null) => {
     setFormData((prev) => {
       // 如果启用水印开关，且当前没有水印配置或水印文字为空，自动添加/更新默认水印
       if (field === 'watermark_enabled' && value === true) {
@@ -275,6 +287,11 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
         poster_image_url: formData.poster_image_url.trim() || null,
         watermark_config: watermarkConfig,
         color_grading: colorGrading,  // 新增：调色配置
+        // 多语言翻译
+        title_translations: formData.title_translations,
+        description_translations: formData.description_translations,
+        share_title_translations: formData.share_title_translations,
+        share_description_translations: formData.share_description_translations,
       }
 
       const response = await fetch(`/api/admin/albums/${album.id}`, {
@@ -340,26 +357,47 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
       {/* 基本信息 */}
       <section className="card space-y-4">
         <h2 className="text-lg font-medium">基本信息</h2>
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-2">
-            相册标题
-          </label>
-          <input
-            type="text"
-            required
-            value={formData.title}
-            onChange={(e) => handleChange('title', e.target.value)}
-            className="input"
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-2">
+              相册标题
+            </label>
+            <input
+              type="text"
+              required
+              value={formData.title}
+              onChange={(e) => handleChange('title', e.target.value)}
+              className="input"
+            />
+          </div>
+          <TranslationEditor
+            label="标题"
+            value={formData.title_translations as Record<string, string> | null}
+            onChange={(value) => handleChange('title_translations', value)}
+            defaultValue={formData.title}
+            placeholder="输入该语言的标题"
+            maxLength={200}
           />
         </div>
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-2">
-            相册描述
-          </label>
-          <textarea
-            value={formData.description}
-            onChange={(e) => handleChange('description', e.target.value)}
-            className="input min-h-[100px] resize-none"
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-2">
+              相册描述
+            </label>
+            <textarea
+              value={formData.description}
+              onChange={(e) => handleChange('description', e.target.value)}
+              className="input min-h-[100px] resize-none"
+            />
+          </div>
+          <TranslationEditor
+            label="描述"
+            value={formData.description_translations as Record<string, string> | null}
+            onChange={(value) => handleChange('description_translations', value)}
+            defaultValue={formData.description}
+            placeholder="输入该语言的描述"
+            multiline
+            maxLength={1000}
           />
         </div>
 
@@ -946,35 +984,56 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
         </p>
 
         <div className="space-y-4 pt-4 border-t border-border">
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">
-              分享标题
-            </label>
-            <input
-              type="text"
-              value={formData.share_title}
-              onChange={(e) => handleChange('share_title', e.target.value)}
-              className="input"
-              placeholder={album.title}
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                分享标题
+              </label>
+              <input
+                type="text"
+                value={formData.share_title}
+                onChange={(e) => handleChange('share_title', e.target.value)}
+                className="input"
+                placeholder={album.title}
+              />
+              <p className="text-xs text-text-muted mt-1">
+                留空则使用相册标题
+              </p>
+            </div>
+            <TranslationEditor
+              label="分享标题"
+              value={formData.share_title_translations as Record<string, string> | null}
+              onChange={(value) => handleChange('share_title_translations', value)}
+              defaultValue={formData.share_title || formData.title}
+              placeholder="输入该语言的分享标题"
+              maxLength={100}
             />
-            <p className="text-xs text-text-muted mt-1">
-              留空则使用相册标题
-            </p>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-2">
-              分享描述
-            </label>
-            <textarea
-              value={formData.share_description}
-              onChange={(e) => handleChange('share_description', e.target.value)}
-              className="input min-h-[80px] resize-none"
-              placeholder={album.description || '查看精彩照片'}
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-2">
+                分享描述
+              </label>
+              <textarea
+                value={formData.share_description}
+                onChange={(e) => handleChange('share_description', e.target.value)}
+                className="input min-h-[80px] resize-none"
+                placeholder={album.description || '查看精彩照片'}
+              />
+              <p className="text-xs text-text-muted mt-1">
+                留空则使用相册描述或默认文案
+              </p>
+            </div>
+            <TranslationEditor
+              label="分享描述"
+              value={formData.share_description_translations as Record<string, string> | null}
+              onChange={(value) => handleChange('share_description_translations', value)}
+              defaultValue={formData.share_description || formData.description}
+              placeholder="输入该语言的分享描述"
+              multiline
+              maxLength={300}
             />
-            <p className="text-xs text-text-muted mt-1">
-              留空则使用相册描述或默认文案
-            </p>
           </div>
 
           <div>

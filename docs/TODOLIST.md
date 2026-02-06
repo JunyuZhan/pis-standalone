@@ -407,7 +407,7 @@
 - [x] 相册多语言标题/描述
   - [x] 数据库字段支持（title_translations, description_translations 等 JSONB 字段）
   - [x] API 支持（createAlbumSchema, updateAlbumSchema 添加多语言字段）
-  - [ ] 前端编辑组件（待实现）
+  - [x] 前端编辑组件（TranslationEditor 组件）
 - [ ] 语言包管理界面
 
 **已完成的技术实现：**
@@ -421,6 +421,7 @@
 2. 组件
    - components/ui/language-switcher.tsx: 语言切换组件
    - components/admin/sidebar.tsx: 使用 useTranslations
+   - components/admin/translation-editor.tsx: 多语言编辑器组件
 
 3. 翻译内容
    - 后台侧边栏菜单
@@ -429,6 +430,13 @@
    - 数据统计相关
    - 系统升级相关
    - 系统设置相关
+
+4. 相册多语言编辑
+   - 标题多语言编辑（title_translations）
+   - 描述多语言编辑（description_translations）
+   - 分享标题多语言编辑（share_title_translations）
+   - 分享描述多语言编辑（share_description_translations）
+   - 已集成到 album-settings-form.tsx
 ```
 
 ### 9. 插件系统
