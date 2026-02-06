@@ -1579,6 +1579,8 @@ main() {
         echo ""
         echo -e "${YELLOW}文件路径:${NC} $compose_file"
         echo -e "${YELLOW}当前目录:${NC} $(pwd)"
+        echo -e "${YELLOW}项目根目录:${NC} $PROJECT_ROOT"
+        echo -e "${YELLOW}Docker 目录:${NC} $DOCKER_DIR"
         echo ""
         echo -e "${CYAN}请检查：${NC}"
         echo "  1. 文件是否存在于 docker/ 目录"
@@ -1587,8 +1589,14 @@ main() {
         echo ""
         echo -e "${CYAN}建议操作：${NC}"
         echo "  cd $PROJECT_ROOT"
-        echo "  git pull"
-        echo "  ls -la docker/docker-compose.yml"
+        echo "  git status                    # 检查 Git 状态"
+        echo "  git pull                      # 拉取最新代码"
+        echo "  ls -la docker/docker-compose.yml  # 确认文件存在"
+        echo ""
+        echo -e "${CYAN}如果文件确实不存在，请检查：${NC}"
+        echo "  - Git 仓库是否完整克隆"
+        echo "  - 文件是否被 .gitignore 忽略（不应该）"
+        echo "  - 文件是否被意外删除"
         exit 1
     fi
     
