@@ -105,35 +105,35 @@ export function getAppBaseUrl(): string {
     return process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
   }
   
-  // 客户端：优先使用当前域名，避免使用 localhost 配置
+  // 客户端：智能处理域名/IP 不匹配的情况
   const envUrl = process.env.NEXT_PUBLIC_APP_URL
   const currentOrigin = window.location.origin
   const currentHost = window.location.hostname
   
-  // 如果环境变量配置的是 localhost，但当前访问的是域名，使用当前域名
-  if (envUrl) {
-    try {
-      const url = new URL(envUrl)
-      // 如果配置的是 localhost/127.0.0.1，但当前访问的是实际域名，使用当前域名
-      if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') &&
-          currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
-        return currentOrigin
-      }
-      
-      // 如果配置的域名和当前域名不匹配，且配置的是 localhost，使用当前域名
-      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
-        return currentOrigin
-      }
-      
-      return envUrl
-    } catch {
-      // URL 解析失败，使用当前域名
-      return currentOrigin
-    }
+  // 如果没有配置环境变量，使用当前域名
+  if (!envUrl) {
+    return currentOrigin
   }
   
-  // 没有配置环境变量，使用当前域名
-  return currentOrigin
+  try {
+    const url = new URL(envUrl)
+    const configuredHost = url.hostname
+    
+    // 核心逻辑：如果配置的主机与当前主机不同，使用当前域名
+    // 这样无论是 localhost、IP 地址还是域名，只要不匹配就自动使用当前页面的域名
+    // 这支持以下场景：
+    // - 配置 localhost，通过域名访问
+    // - 配置内网 IP，通过域名访问
+    // - 配置域名 A，通过域名 B 访问（反向代理）
+    if (configuredHost !== currentHost) {
+      return currentOrigin
+    }
+    
+    return envUrl
+  } catch {
+    // URL 解析失败，使用当前域名
+    return currentOrigin
+  }
 }
 
 /**
@@ -193,69 +193,29 @@ export function getSafeMediaUrl(url?: string): string {
   }
   
   try {
-    const url = new URL(mediaUrl)
+    const parsedUrl = new URL(mediaUrl)
     
-    // 服务端和客户端都处理 localhost HTTPS 问题
-    // 如果 hostname 是 localhost 或 127.0.0.1，且协议是 https，转换为相对路径
-    if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') && 
-        url.protocol === 'https:') {
-      // 对于 localhost HTTPS，使用相对路径更安全（避免连接被拒绝）
-      return url.pathname || '/media'
+    // 服务端：保持原样（服务端可能需要完整 URL）
+    if (typeof window === 'undefined') {
+      // 对于 localhost HTTPS，使用相对路径更安全
+      if ((parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1') && 
+          parsedUrl.protocol === 'https:') {
+        return parsedUrl.pathname || '/media'
+      }
+      return mediaUrl
     }
     
-    // 客户端：开发环境特殊处理
-    // 如果配置了 localhost:8080 但实际运行在 3000 端口，转换为相对路径
-    if (typeof window !== 'undefined') {
-      const currentPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80')
-      const currentHost = window.location.hostname
-      
-      // 开发环境：如果配置的端口和当前端口不匹配，使用相对路径
-      // 这样可以避免端口不匹配导致的连接错误
-      if ((currentHost === 'localhost' || currentHost === '127.0.0.1') &&
-          (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) {
-        // 开发环境通常运行在 3000 端口（或空端口，表示默认 HTTP 80）
-        // 如果配置的端口是 8080（生产环境），但当前端口是 3000 或空（开发环境），使用相对路径
-        const isDevelopment = currentPort === '3000' || currentPort === ''
-        const isProductionPort = url.port === '8080'
-        
-        if (isDevelopment && isProductionPort) {
-          // 开发环境但配置了生产端口，强制使用相对路径
-          console.warn('[getSafeMediaUrl] 检测到开发环境端口不匹配，转换为相对路径:', {
-            currentPort,
-            configuredPort: url.port,
-            originalUrl: mediaUrl,
-            convertedPath: url.pathname || '/media'
-          })
-          return url.pathname || '/media'
-        }
-        
-        // 如果配置的端口和当前端口不匹配，且不是标准端口（80/443），使用相对路径
-        if (url.port && url.port !== currentPort && currentPort !== '80' && currentPort !== '443') {
-          console.warn('[getSafeMediaUrl] 检测到端口不匹配，转换为相对路径:', {
-            currentPort,
-            configuredPort: url.port,
-            originalUrl: mediaUrl,
-            convertedPath: url.pathname || '/media'
-          })
-          return url.pathname || '/media'
-        }
-      }
-      
-      // 如果 hostname 是 localhost 且协议是 https，但当前页面是 http
-      // 则转换为相对路径或使用当前页面协议
-      if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') && 
-          url.protocol === 'https:' && 
-          window.location.protocol === 'http:') {
-        // 使用相对路径，让浏览器自动使用当前页面的协议和域名
-        return url.pathname || '/media'
-      }
-      
-      // 强制检查：如果当前是开发环境（3000端口），且配置的 URL 包含 8080，强制转换为相对路径
-      // 这是最后的保障，确保开发环境不会使用错误的端口
-      if (currentPort === '3000' && mediaUrl.includes(':8080')) {
-        console.warn('[getSafeMediaUrl] 强制转换：开发环境检测到 8080 端口，转换为相对路径')
-        return url.pathname || '/media'
-      }
+    // 客户端：智能处理域名/IP 不匹配
+    const currentHost = window.location.hostname
+    const configuredHost = parsedUrl.hostname
+    
+    // 核心逻辑：如果配置的主机与当前主机不同，使用相对路径
+    // 这支持以下场景：
+    // - 配置 localhost，通过域名访问
+    // - 配置内网 IP，通过域名访问（frpc 反向代理）
+    // - 配置域名 A，通过域名 B 访问
+    if (configuredHost !== currentHost) {
+      return parsedUrl.pathname || '/media'
     }
     
     return mediaUrl

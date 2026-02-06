@@ -469,8 +469,9 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
         reject(new Error(`上传超时：文件过大（${fileSizeMb}MB）或网络较慢，已等待 ${timeoutMinutes} 分钟。请检查网络连接后重试`))
       }
 
-      const workerDirectUrl = process.env.NEXT_PUBLIC_WORKER_URL || 'http://localhost:3001'
-      xhr.open('PUT', `${workerDirectUrl}/api/upload?key=${encodeURIComponent(originalKey)}`)
+      // 使用相对路径，通过 Nginx 代理到 Worker API
+      // 这样无论用户通过什么域名/IP 访问，都能正确路由
+      xhr.open('PUT', `/worker-api/api/upload?key=${encodeURIComponent(originalKey)}`)
       xhr.setRequestHeader('Content-Type', uploadFile.file.type)
       uploadStartTime = Date.now()
       xhr.send(uploadFile.file)
