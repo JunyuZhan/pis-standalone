@@ -195,14 +195,14 @@ export function getSafeMediaUrl(url?: string): string {
   try {
     const parsedUrl = new URL(mediaUrl)
     
-    // 服务端：保持原样（服务端可能需要完整 URL）
+    // 服务端：使用相对路径（避免容器内无法访问外部 URL 的问题）
+    // Next.js Image 优化器在服务端运行，如果 URL 是 localhost:8088，
+    // 在容器内部是无法访问的，会导致 500 错误
     if (typeof window === 'undefined') {
-      // 对于 localhost HTTPS，使用相对路径更安全
-      if ((parsedUrl.hostname === 'localhost' || parsedUrl.hostname === '127.0.0.1') && 
-          parsedUrl.protocol === 'https:') {
-        return parsedUrl.pathname || '/media'
-      }
-      return mediaUrl
+      // 服务端始终使用相对路径，这样：
+      // 1. Next.js Image 可以通过内部路由访问图片
+      // 2. 避免 localhost/IP 在容器内无法解析的问题
+      return parsedUrl.pathname || '/media'
     }
     
     // 客户端：智能处理域名/IP 不匹配
