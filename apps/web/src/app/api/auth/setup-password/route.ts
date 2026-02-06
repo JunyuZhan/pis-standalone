@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
       }
       
       // 查找用户（这里可能会抛出数据库连接错误）
-      let user: Awaited<ReturnType<typeof authDb.findUserByEmail>>
+      let user: { id: string; email: string; password_hash: string | null } | null
       try {
         user = await authDb.findUserByEmail(normalizedEmail)
       } catch (dbError) {
