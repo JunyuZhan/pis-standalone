@@ -1582,22 +1582,48 @@ main() {
         echo -e "${YELLOW}项目根目录:${NC} $PROJECT_ROOT"
         echo -e "${YELLOW}Docker 目录:${NC} $DOCKER_DIR"
         echo ""
-        echo -e "${CYAN}请检查：${NC}"
-        echo "  1. 文件是否存在于 docker/ 目录"
-        echo "  2. 是否已执行 git pull 拉取最新代码"
-        echo "  3. 是否在正确的项目目录下运行脚本"
-        echo ""
-        echo -e "${CYAN}建议操作：${NC}"
-        echo "  cd $PROJECT_ROOT"
-        echo "  git status                    # 检查 Git 状态"
-        echo "  git pull                      # 拉取最新代码"
-        echo "  ls -la docker/docker-compose.yml  # 确认文件存在"
-        echo ""
-        echo -e "${CYAN}如果文件确实不存在，请检查：${NC}"
-        echo "  - Git 仓库是否完整克隆"
-        echo "  - 文件是否被 .gitignore 忽略（不应该）"
-        echo "  - 文件是否被意外删除"
-        exit 1
+        
+        # 尝试从 Git 恢复文件
+        echo -e "${CYAN}尝试从 Git 恢复文件...${NC}"
+        cd "$PROJECT_ROOT"
+        
+        # 检查文件是否在 Git 中
+        if git ls-files --error-unmatch docker/docker-compose.yml >/dev/null 2>&1; then
+            echo -e "${CYAN}文件在 Git 仓库中，尝试恢复...${NC}"
+            if git checkout docker/docker-compose.yml 2>/dev/null; then
+                print_success "文件已从 Git 恢复"
+                echo ""
+            else
+                echo -e "${YELLOW}自动恢复失败，请手动执行以下命令：${NC}"
+                echo ""
+                echo "  cd $PROJECT_ROOT"
+                echo "  git checkout docker/docker-compose.yml"
+                echo "  或"
+                echo "  git checkout HEAD -- docker/docker-compose.yml"
+                echo ""
+                exit 1
+            fi
+        else
+            echo -e "${YELLOW}文件不在 Git 仓库中，请检查：${NC}"
+            echo ""
+            echo "  1. Git 仓库是否完整克隆"
+            echo "  2. 是否在正确的分支上（development）"
+            echo "  3. 文件是否被 .gitignore 忽略"
+            echo ""
+            echo -e "${CYAN}建议操作：${NC}"
+            echo "  cd $PROJECT_ROOT"
+            echo "  git status"
+            echo "  git pull"
+            echo "  git checkout docker/docker-compose.yml"
+            echo ""
+            exit 1
+        fi
+        
+        # 再次检查文件是否存在
+        if [ ! -f "$compose_file" ]; then
+            print_error "文件恢复后仍然不存在"
+            exit 1
+        fi
     fi
     
     if [ ! -f "$env_example" ]; then
