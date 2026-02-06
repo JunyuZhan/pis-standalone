@@ -1596,7 +1596,25 @@ main() {
         print_step "10/11" "启动服务"
         echo ""
         
-        cd "$DOCKER_DIR"
+        # 使用绝对路径检查文件是否存在
+        local compose_file="$DOCKER_DIR/docker-compose.yml"
+        if [ ! -f "$compose_file" ]; then
+            print_error "找不到 docker-compose.yml 文件"
+            echo ""
+            echo -e "${YELLOW}期望路径:${NC} $compose_file"
+            echo -e "${YELLOW}当前工作目录:${NC} $(pwd)"
+            echo -e "${YELLOW}DOCKER_DIR:${NC} $DOCKER_DIR"
+            echo ""
+            echo -e "${CYAN}请检查文件是否存在，或确保在正确的目录下运行脚本${NC}"
+            echo -e "${CYAN}提示: 脚本应该从项目根目录或 docker 目录运行${NC}"
+            exit 1
+        fi
+        
+        # 切换到 Docker 目录（使用绝对路径）
+        if ! cd "$DOCKER_DIR"; then
+            print_error "无法切换到 Docker 目录: $DOCKER_DIR"
+            exit 1
+        fi
         
         # 检查是否有旧容器冲突（所有容器都使用 pis- 前缀）
         echo -e "${CYAN}检查是否有旧容器...${NC}"
@@ -1616,17 +1634,6 @@ main() {
                 print_warning "保留旧容器，如果启动失败请手动清理"
             fi
             echo ""
-        fi
-        
-        # 检查 docker-compose.yml 文件是否存在
-        if [ ! -f "docker-compose.yml" ]; then
-            print_error "找不到 docker-compose.yml 文件"
-            echo ""
-            echo -e "${YELLOW}当前目录:${NC} $(pwd)"
-            echo -e "${YELLOW}期望文件:${NC} docker-compose.yml"
-            echo ""
-            echo -e "${CYAN}请确保在正确的目录下运行脚本${NC}"
-            exit 1
         fi
         
         echo -e "${CYAN}正在启动 Docker 服务...${NC}"
@@ -1666,16 +1673,23 @@ main() {
         echo ""
         echo -e "${CYAN}正在启动 Docker 基础服务...${NC}"
         
-        cd "$DOCKER_DIR"
-        
-        # 检查 docker-compose.yml 文件是否存在
-        if [ ! -f "docker-compose.yml" ]; then
+        # 使用绝对路径检查文件是否存在
+        local compose_file="$DOCKER_DIR/docker-compose.yml"
+        if [ ! -f "$compose_file" ]; then
             print_error "找不到 docker-compose.yml 文件"
             echo ""
-            echo -e "${YELLOW}当前目录:${NC} $(pwd)"
-            echo -e "${YELLOW}期望文件:${NC} docker-compose.yml"
+            echo -e "${YELLOW}期望路径:${NC} $compose_file"
+            echo -e "${YELLOW}当前工作目录:${NC} $(pwd)"
+            echo -e "${YELLOW}DOCKER_DIR:${NC} $DOCKER_DIR"
             echo ""
-            echo -e "${CYAN}请确保在正确的目录下运行脚本${NC}"
+            echo -e "${CYAN}请检查文件是否存在，或确保在正确的目录下运行脚本${NC}"
+            echo -e "${CYAN}提示: 脚本应该从项目根目录或 docker 目录运行${NC}"
+            exit 1
+        fi
+        
+        # 切换到 Docker 目录（使用绝对路径）
+        if ! cd "$DOCKER_DIR"; then
+            print_error "无法切换到 Docker 目录: $DOCKER_DIR"
             exit 1
         fi
         
