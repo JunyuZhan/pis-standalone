@@ -3,11 +3,16 @@ FROM python:3.9-slim
 
 WORKDIR /app
 
-# 安装系统依赖 (OpenCV 需要)
+# 安装系统依赖 (OpenCV 需要 + 构建工具用于编译 insightface)
 # 注意：在 Debian Trixie 中，libgl1-mesa-glx 已被 libgl1 替代
+# build-essential: 包含 gcc, g++, make 等编译工具
+# python3-dev: Python 开发头文件，用于编译 Python C 扩展
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
+    build-essential \
+    g++ \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # 配置 pip 使用国内镜像源（提高下载速度，避免超时）
@@ -51,6 +56,13 @@ RUN pip install --no-cache-dir --timeout=600 --retries=10 \
     pip install --no-cache-dir --timeout=900 --retries=15 \
     insightface \
     onnxruntime
+
+# 清理构建依赖以减小镜像大小（保留运行时依赖）
+RUN apt-get update && \
+    apt-get purge -y build-essential g++ python3-dev && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY src/ ./src/
 
