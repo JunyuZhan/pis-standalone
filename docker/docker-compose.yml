@@ -88,6 +88,9 @@ services:
     volumes:
       - pis_minio_data:/data
     command: server /data --console-address ":9001"
+    restart: unless-stopped
+    networks:
+      - pis-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
