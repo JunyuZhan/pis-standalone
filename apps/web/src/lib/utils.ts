@@ -318,21 +318,34 @@ export function truncateText(text: string, maxLength: number): string {
  * 生成安全的随机令牌（用于 upload_token）
  *
  * @description 使用 crypto.randomBytes 生成安全的随机字符串
- * @param {number} [length=48] 令牌长度（字节数，默认 48，生成 64 字符的十六进制字符串）
- * @returns {string} 随机令牌字符串（十六进制格式）
+ * 为了便于在相机上输入，使用较短的令牌长度（12 字节 = 24 个字符）
+ * 使用 Base36 编码（只包含数字和字母），避免特殊字符，更适合相机输入
+ * 
+ * @param {number} [length=12] 令牌长度（字节数，默认 12，生成约 18-20 个字符的 Base36 字符串）
+ * @returns {string} 随机令牌字符串（Base36 格式，只包含数字和字母）
  *
  * @example
  * ```typescript
  * const token = generateUploadToken()
- * // 返回类似 "a1b2c3d4e5f6..." 的 64 字符字符串
+ * // 返回类似 "k3j9x2m8p5q1r4" 的 18-20 字符字符串
  * ```
  */
-export function generateUploadToken(length: number = 48): string {
+export function generateUploadToken(length: number = 12): string {
+  // Base36 字符集（0-9, a-z）
+  const base36Chars = '0123456789abcdefghijklmnopqrstuvwxyz'
+  
   // 服务端：使用 Node.js crypto 模块
   if (typeof window === 'undefined' && typeof require !== 'undefined') {
     try {
       const crypto = require('crypto')
-      return crypto.randomBytes(length).toString('hex')
+      const bytes = crypto.randomBytes(length)
+      // 转换为 Base36（使用数字和字母，避免特殊字符）
+      let result = ''
+      for (let i = 0; i < bytes.length; i++) {
+        // 将每个字节映射到 Base36 字符集
+        result += base36Chars[bytes[i] % 36]
+      }
+      return result
     } catch {
       // 如果 require 失败，回退到其他方法
     }
@@ -342,14 +355,18 @@ export function generateUploadToken(length: number = 48): string {
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
     const array = new Uint8Array(length)
     crypto.getRandomValues(array)
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('')
+    // 转换为 Base36
+    let result = ''
+    for (let i = 0; i < array.length; i++) {
+      result += base36Chars[array[i] % 36]
+    }
+    return result
   }
 
   // 最后的回退方案：使用 Math.random（不够安全，但总比没有好）
-  const chars = '0123456789abcdef'
   let result = ''
-  for (let i = 0; i < length * 2; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)]
+  for (let i = 0; i < length; i++) {
+    result += base36Chars[Math.floor(Math.random() * 36)]
   }
   return result
 }
