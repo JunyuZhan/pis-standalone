@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, RefreshCw, Pause, Play } from 'lucide-react'
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, RefreshCw, Pause, Play, FolderOpen } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 
 // 上传配置
@@ -1596,6 +1596,7 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
             : 'border-border hover:border-border-light'
         )}
       >
+        {/* 选择文件 */}
         <input
           type="file"
           id="file-input"
@@ -1610,14 +1611,51 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
           }}
           className="hidden"
         />
-        <label htmlFor="file-input" className="cursor-pointer block">
+        {/* 选择文件夹（桌面端和 Android 支持） */}
+        <input
+          type="file"
+          id="folder-input"
+          multiple
+          // @ts-expect-error webkitdirectory 是非标准属性但广泛支持
+          webkitdirectory=""
+          directory=""
+          accept="image/jpeg,image/png,image/heic,image/webp,image/gif,image/tiff,.jpg,.jpeg,.png,.heic,.webp,.gif,.tiff,.tif"
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) {
+              addFiles(e.target.files)
+              e.target.value = ''
+            }
+          }}
+          className="hidden"
+        />
+        <div className="flex flex-col items-center">
           <Upload className="w-10 h-10 md:w-12 md:h-12 text-text-muted mx-auto mb-3 md:mb-4" />
           <p className="text-base md:text-lg font-medium mb-1 md:mb-2">
             点击选择文件<span className="hidden md:inline">，或拖拽照片到此处</span>
           </p>
-          <p className="text-text-secondary text-xs md:text-sm mb-2">
+          <p className="text-text-secondary text-xs md:text-sm mb-3">
             支持 JPG、PNG、HEIC、WebP 格式，单文件最大 100MB
           </p>
+          {/* 按钮组 */}
+          <div className="flex flex-wrap justify-center gap-2 mb-2">
+            <label 
+              htmlFor="file-input" 
+              className="inline-flex items-center gap-2 px-4 py-2 bg-accent text-background rounded-lg cursor-pointer hover:bg-accent/90 transition-colors text-sm font-medium"
+            >
+              <Upload className="w-4 h-4" />
+              选择照片
+            </label>
+            {!isIOS && (
+              <label 
+                htmlFor="folder-input" 
+                className="inline-flex items-center gap-2 px-4 py-2 bg-surface-elevated text-text-primary border border-border rounded-lg cursor-pointer hover:bg-surface hover:border-border-light transition-colors text-sm font-medium"
+                title="选择整个文件夹，一次性上传所有照片"
+              >
+                <FolderOpen className="w-4 h-4" />
+                选择文件夹
+              </label>
+            )}
+          </div>
           {isMobile && (
             <div className="mt-3 p-3 bg-surface-elevated rounded-lg border border-border text-left">
               <p className="text-xs font-medium text-text-primary mb-2">
@@ -1645,25 +1683,22 @@ export function PhotoUploader({ albumId, onComplete }: PhotoUploaderProps) {
               ) : (
                 <div className="text-xs text-text-secondary space-y-1.5">
                   <p className="flex items-start gap-2">
+                    <span className="text-green-400 mt-0.5">✓</span>
+                    <span><strong>选择文件夹</strong>：点击&ldquo;选择文件夹&rdquo;可一次性选择整个文件夹内所有照片（推荐）</span>
+                  </p>
+                  <p className="flex items-start gap-2">
+                    <span className="text-green-400 mt-0.5">✓</span>
+                    <span><strong>多选照片</strong>：<strong>长按第一张</strong>进入选择模式，然后点击或滑动选择其他照片</span>
+                  </p>
+                  <p className="flex items-start gap-2">
                     <span className="text-blue-400 mt-0.5">ℹ</span>
-                    <span><strong>默认打开</strong>：可能打开相册或文件管理器，取决于浏览器设置</span>
+                    <span>或点击右上角菜单选择<strong>&ldquo;选择多个&rdquo;</strong>进入多选模式</span>
                   </p>
-                  <p className="flex items-start gap-2">
-                    <span className="text-green-400 mt-0.5">✓</span>
-                    <span><strong>多选方法</strong>：<strong>长按第一张照片</strong>进入选择模式，然后点击其他照片多选</span>
-                  </p>
-                  <p className="flex items-start gap-2">
-                    <span className="text-green-400 mt-0.5">✓</span>
-                    <span>或点击右上角菜单选择<strong>&ldquo;选择多个&rdquo;</strong>，然后可滑动选择</span>
-                  </p>
-                  <div className="pl-6 pt-1 space-y-1 text-text-muted">
-                    <p>• <strong>相机存储卡</strong>：在文件管理器中找到相机存储卡（通常显示为USB存储），支持多选</p>
-                  </div>
                 </div>
               )}
             </div>
           )}
-        </label>
+        </div>
       </div>
 
       {/* 上传进度 */}
