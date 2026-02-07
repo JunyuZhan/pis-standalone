@@ -356,6 +356,38 @@ const nextConfig: NextConfig = {
         ].filter((header) => header.value !== ""), // 过滤空值
       },
       {
+        // PWA manifest.json：设置正确的 Content-Type
+        source: "/manifest.json",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/manifest+json",
+          },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=3600, must-revalidate",
+          },
+        ],
+      },
+      {
+        // PWA Service Worker：设置正确的 Content-Type
+        source: "/sw.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+          {
+            key: "Service-Worker-Allowed",
+            value: "/",
+          },
+        ],
+      },
+      {
         // 微信验证文件：确保可访问且不被缓存
         // 注意：必须放在其他规则之前，确保优先级最高
         source: "/4dedffaa9e333b0d5a389c628935fa49.txt",
