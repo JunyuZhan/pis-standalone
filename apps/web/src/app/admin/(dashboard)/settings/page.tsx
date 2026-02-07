@@ -19,6 +19,7 @@ import {
   Palette,
   ScrollText,
   Shield,
+  Archive,
 } from "lucide-react";
 import { ChangePasswordForm } from "@/components/admin/change-password-form";
 import { TemplateManager } from "@/components/admin/template-manager";
@@ -26,6 +27,7 @@ import { ConsistencyChecker } from "@/components/admin/consistency-checker";
 import { UpgradeManager } from "@/components/admin/upgrade-manager";
 import { AIRetouchSettings } from "@/components/admin/ai-retouch-settings";
 import { SystemSettingsSection } from "@/components/admin/system-settings-section";
+import { APP_VERSION } from "@/lib/version";
 
 export default async function SettingsPage() {
   const db = await createClient();
@@ -205,7 +207,7 @@ export default async function SettingsPage() {
         <div className="space-y-3 text-sm">
           <div className="flex justify-between items-center py-2 border-b border-border/50">
             <span className="text-text-muted">应用版本</span>
-            <span className="font-medium">1.0.0</span>
+            <span className="font-medium">v{APP_VERSION}</span>
           </div>
           <div className="flex justify-between items-center py-2 border-b border-border/50">
             <span className="text-text-muted">数据库</span>
@@ -345,6 +347,24 @@ export default async function SettingsPage() {
         >
           <p className="font-medium">角色权限配置</p>
           <p className="text-sm text-text-muted">管理摄影师、修图师、查看者的权限</p>
+        </a>
+      </div>
+
+      {/* 数据备份 */}
+      <div className="card">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Archive className="w-5 h-5 text-accent" />
+          数据备份
+        </h2>
+        <p className="text-sm text-text-muted mb-4">
+          导出和导入系统数据，进行数据备份和恢复
+        </p>
+        <a
+          href="/admin/settings/backup"
+          className="block p-3 bg-surface rounded-lg hover:bg-surface-elevated transition-colors cursor-pointer"
+        >
+          <p className="font-medium">备份管理</p>
+          <p className="text-sm text-text-muted">导出数据、导入备份、查看存储统计</p>
         </a>
       </div>
 
