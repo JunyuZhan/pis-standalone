@@ -821,10 +821,41 @@ export class PhotoProcessor {
   }
 
   /**
-   * 清理 EXIF 数据，移除敏感信息（GPS）
+   * 清理字符串中的 NULL 字符（\u0000）
    *
    * @description
-   * 移除 GPS 位置信息以保护隐私
+   * PostgreSQL 不支持在 JSON/text 字段中存储 \u0000 字符
+   * 相机 EXIF 数据（如 BodySerialNumber）可能包含 C 语言风格的 null 结尾字符串
+   *
+   * @param value - 任意值
+   * @returns 清理后的值
+   *
+   * @internal
+   */
+  private removeNullChars(value: unknown): unknown {
+    if (typeof value === 'string') {
+      // 移除所有 \u0000 字符
+      return value.replace(/\u0000/g, '');
+    }
+    if (Array.isArray(value)) {
+      return value.map(item => this.removeNullChars(item));
+    }
+    if (value && typeof value === 'object') {
+      const cleaned: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(value)) {
+        cleaned[key] = this.removeNullChars(val);
+      }
+      return cleaned;
+    }
+    return value;
+  }
+
+  /**
+   * 清理 EXIF 数据，移除敏感信息（GPS）和不安全字符
+   *
+   * @description
+   * - 移除 GPS 位置信息以保护隐私
+   * - 移除 \u0000 字符（PostgreSQL 不支持）
    *
    * @param {any} rawExif - 原始 EXIF 对象
    * @returns {any} 清理后的 EXIF 对象
@@ -872,7 +903,8 @@ export class PhotoProcessor {
       }
     });
 
-    return sanitized;
+    // 清理所有 \u0000 字符（PostgreSQL 不支持）
+    return this.removeNullChars(sanitized);
   }
 
   /**
