@@ -94,7 +94,9 @@ export function HomeHero({ featuredAlbum, coverPhoto }: HomeHeroProps) {
             className="flex items-center justify-center gap-2 sm:gap-3 mb-2 sm:mb-3"
           >
             <Aperture className="w-7 h-7 sm:w-9 sm:h-9 md:w-10 md:h-10 text-accent" />
-            <span className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-serif font-bold text-white tracking-wider">
+            <span className={`text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-serif font-bold tracking-wider ${
+              coverUrl ? 'text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]' : 'text-text-primary drop-shadow-[0_2px_4px_rgba(0,0,0,0.1)]'
+            }`}>
               PIS
             </span>
           </motion.div>
@@ -104,11 +106,15 @@ export function HomeHero({ featuredAlbum, coverPhoto }: HomeHeroProps) {
             initial={{ opacity: prefersReducedMotion ? 1 : 0, y: prefersReducedMotion ? 0 : 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: prefersReducedMotion ? 0 : 0.7, delay: prefersReducedMotion ? 0 : 0.1, ease: 'easeOut' }}
-            className="text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-serif font-bold text-white drop-shadow-2xl leading-tight px-2"
+            className={`text-3xl sm:text-4xl md:text-6xl lg:text-7xl font-serif font-bold leading-tight px-2 ${
+              coverUrl 
+                ? 'text-white drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]' 
+                : 'text-text-primary drop-shadow-[0_2px_6px_rgba(0,0,0,0.15)]'
+            }`}
           >
             {t('title')}
             <br />
-            <span className="text-accent">{t('subtitle')}</span>
+            <span className="text-accent drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]">{t('subtitle')}</span>
           </motion.h1>
 
           {/* 副标题 */}
@@ -116,7 +122,11 @@ export function HomeHero({ featuredAlbum, coverPhoto }: HomeHeroProps) {
             initial={{ opacity: prefersReducedMotion ? 1 : 0, y: prefersReducedMotion ? 0 : 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: prefersReducedMotion ? 0 : 0.7, delay: prefersReducedMotion ? 0 : 0.2, ease: 'easeOut' }}
-            className="text-sm sm:text-base md:text-lg lg:text-xl text-white/90 font-light tracking-wide max-w-2xl mx-auto px-2"
+            className={`text-sm sm:text-base md:text-lg lg:text-xl font-light tracking-wide max-w-2xl mx-auto px-2 ${
+              coverUrl 
+                ? 'text-white/90 drop-shadow-[0_2px_6px_rgba(0,0,0,0.6)]' 
+                : 'text-text-secondary drop-shadow-[0_1px_3px_rgba(0,0,0,0.1)]'
+            }`}
           >
             {t('tagline')}
           </motion.p>
@@ -129,10 +139,18 @@ export function HomeHero({ featuredAlbum, coverPhoto }: HomeHeroProps) {
               transition={{ duration: prefersReducedMotion ? 0 : 0.7, delay: prefersReducedMotion ? 0 : 0.3, ease: 'easeOut' }}
               className="pt-2 sm:pt-4"
             >
-              <div className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-white/10 backdrop-blur-md rounded-full border border-white/20">
-                <span className="text-[10px] sm:text-xs text-white/80">{t('latest')}</span>
+              <div className={`inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 backdrop-blur-md rounded-full ${
+                coverUrl 
+                  ? 'bg-white/10 border border-white/20' 
+                  : 'bg-surface-elevated/80 border border-border'
+              }`}>
+                <span className={`text-[10px] sm:text-xs ${
+                  coverUrl ? 'text-white/80' : 'text-text-secondary'
+                }`}>{t('latest')}</span>
                 <span className="w-1 h-1 bg-accent rounded-full" />
-                <span className="text-xs sm:text-sm text-white font-medium line-clamp-1 max-w-[200px] sm:max-w-none">
+                <span className={`text-xs sm:text-sm font-medium line-clamp-1 max-w-[200px] sm:max-w-none ${
+                  coverUrl ? 'text-white' : 'text-text-primary'
+                }`}>
                   {featuredAlbum.title}
                 </span>
               </div>
@@ -147,7 +165,11 @@ export function HomeHero({ featuredAlbum, coverPhoto }: HomeHeroProps) {
         initial={{ opacity: prefersReducedMotion ? 1 : 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: prefersReducedMotion ? 0 : 1.2, duration: prefersReducedMotion ? 0 : 0.5 }}
-        className="absolute bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center text-white/70 cursor-pointer hover:text-white transition-colors touch-manipulation"
+        className={`absolute bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-pointer transition-colors touch-manipulation ${
+          coverUrl 
+            ? 'text-white/70 hover:text-white' 
+            : 'text-text-secondary hover:text-text-primary'
+        }`}
       >
         <span className="text-[10px] sm:text-xs mb-1 sm:mb-2 tracking-wider uppercase">{t('explore')}</span>
         <motion.div
