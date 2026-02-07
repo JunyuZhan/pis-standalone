@@ -257,7 +257,7 @@ export function HomeHero({ featuredAlbum, coverPhoto }: HomeHeroProps) {
         }}
         className={`absolute bottom-4 sm:bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-pointer transition-colors touch-manipulation ${
           isLightMode && coverUrl
-            ? "text-white/70 hover:text-white"
+            ? "text-text-secondary hover:text-text-primary"
             : "text-text-secondary hover:text-text-primary"
         }`}
       >
