@@ -736,6 +736,37 @@ export class PostgreSQLClient {
   }
 
   /**
+   * 执行原始 SQL 查询
+   *
+   * @param sql - SQL 语句
+   * @param params - 查询参数（可选）
+   * @returns 查询结果
+   *
+   * @example
+   * ```typescript
+   * const { data } = await db.query('SELECT * FROM albums WHERE id = $1', ['123'])
+   * const { data } = await db.query('SELECT COUNT(*) FROM photos')
+   * ```
+   */
+  async query<T = unknown>(
+    sql: string,
+    params?: QueryParameterValue[],
+  ): Promise<{ data: T[] | null; error: Error | null }> {
+    try {
+      const result = await this.pool.query(sql, params || []);
+      return {
+        data: result.rows as T[],
+        error: null,
+      };
+    } catch (err: unknown) {
+      return {
+        data: null,
+        error: err instanceof Error ? err : new Error(String(err)),
+      };
+    }
+  }
+
+  /**
    * 插入数据
    *
    * @param table - 表名
