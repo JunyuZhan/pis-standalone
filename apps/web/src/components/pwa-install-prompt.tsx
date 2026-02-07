@@ -123,10 +123,11 @@ export function PWAInstallPrompt() {
           }
         }, 2000)
       } else {
-        // 桌面端：显示自定义提示框，让用户先浏览
+        // 桌面端或移动端没有 beforeinstallprompt 事件：显示自定义提示框
+        // 移动端 Android 如果有 beforeinstallprompt 事件，会在上面的 if 分支直接弹出
         setTimeout(() => {
           if (shouldShowPrompt()) {
-            console.log('[PWA] Desktop device, showing custom install prompt')
+            console.log('[PWA] Desktop or mobile without beforeinstallprompt, showing custom install prompt')
             markPromptShown()
             setShowPrompt(true)
           }
