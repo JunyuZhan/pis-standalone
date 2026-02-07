@@ -22,7 +22,7 @@ interface AuditLog {
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     if (user.role !== 'admin') {
       throw new ApiError('无权导出操作日志', 403)

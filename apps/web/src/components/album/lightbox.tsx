@@ -168,7 +168,6 @@ export function PhotoLightbox({
       const exposureTime = exifData?.ExposureTime as number | undefined
       const iso = exifData?.ISO as number | undefined
       const focalLength = exifData?.FocalLength as number | undefined
-      const dateTime = (exifData?.DateTimeOriginal as string) || photo.captured_at
 
       const exifString = [
         make && model ? `${make} ${model}` : null,
@@ -183,17 +182,6 @@ export function PhotoLightbox({
       ]
         .filter(Boolean)
         .join(' · ')
-
-      // 格式化日期时间（使用固定格式）
-      let formattedDateTime: string | undefined
-      if (dateTime) {
-        try {
-          const date = new Date(dateTime)
-          formattedDateTime = date.toISOString().replace('T', ' ').slice(0, 19)
-        } catch {
-          formattedDateTime = undefined
-        }
-      }
 
       // 默认使用预览图（preview_key），如果用户点击了"查看原图"才使用原图（original_key）
       // 优先级：已加载原图 -> 预览图 -> 缩略图 -> 原图（作为后备）
@@ -217,14 +205,8 @@ export function PhotoLightbox({
             : `${safeMediaUrl.replace(/\/$/, '')}/${imageKey.replace(/^\//, '')}`)
         : ''
 
-      // 构建描述文本：EXIF信息 + 时间 + 图片质量提示
-      let description = exifString || formattedDateTime || ''
-      if (allowDownload && photo.preview_key && photo.original_key) {
-        const qualityHint = '💡 当前为预览图，点击下载按钮获取高清原图'
-        description = description 
-          ? `${description} · ${qualityHint}`
-          : qualityHint
-      }
+      // 构建描述文本：仅显示 EXIF 信息（不显示日期时间和提示文字）
+      const description = exifString || ''
 
       return {
         src: imageSrc,
@@ -237,7 +219,7 @@ export function PhotoLightbox({
         previewKey: photo.preview_key || null,
       }
       })
-    }, [photos, safeMediaUrl, allowDownload])
+    }, [photos, safeMediaUrl])
 
   // 加载当前照片的原图 - 已移除
   // const handleLoadOriginal = useCallback(() => {
@@ -273,9 +255,28 @@ export function PhotoLightbox({
 
       const { downloadUrl, filename } = await res.json()
 
+      // 如果 downloadUrl 是相对路径，转换为完整 URL
+      let fullDownloadUrl = downloadUrl
+      if (downloadUrl.startsWith('/')) {
+        // 相对路径，需要转换为完整 URL
+        if (safeMediaUrl) {
+          // 如果 downloadUrl 是 /media/xxx，需要拼接 safeMediaUrl
+          if (downloadUrl.startsWith('/media/')) {
+            const key = downloadUrl.replace('/media/', '')
+            fullDownloadUrl = `${safeMediaUrl.replace(/\/$/, '')}/${key}`
+          } else {
+            // 其他相对路径，使用当前域名
+            fullDownloadUrl = `${window.location.origin}${downloadUrl}`
+          }
+        } else {
+          // 如果没有 safeMediaUrl，使用当前域名
+          fullDownloadUrl = `${window.location.origin}${downloadUrl}`
+        }
+      }
+
       // 使用 fetch 获取文件数据，然后用 Blob 创建下载
       // 这样可以确保强制下载而不是预览
-      const fileRes = await fetch(downloadUrl)
+      const fileRes = await fetch(fullDownloadUrl)
       if (!fileRes.ok) {
         throw new Error('文件下载失败')
       }
@@ -305,7 +306,7 @@ export function PhotoLightbox({
     } catch (error) {
       handleApiError(error, '下载失败，请重试')
     }
-  }, [currentPhotoId, currentIndex, photos])
+  }, [currentPhotoId, currentIndex, photos, safeMediaUrl])
 
   // 选片功能
   const handleSelect = useCallback(async () => {
@@ -530,9 +531,9 @@ export function PhotoLightbox({
       // 触摸滑动：默认支持触摸屏和触摸板左右滑动
       // 鼠标点击：支持点击左右箭头按钮切换照片
       render={{
-        // 只有一张照片时隐藏导航按钮
-        buttonPrev: photos.length <= 1 ? () => null : undefined,
-        buttonNext: photos.length <= 1 ? () => null : undefined,
+        // 隐藏左右导航按钮
+        buttonPrev: () => null,
+        buttonNext: () => null,
         // 自定义 slide 渲染，应用旋转（保留默认行为）
         slide: ({ slide }) => {
           interface SlideWithPhotoId {

@@ -9,7 +9,7 @@ import { ApiError, handleApiError, requireAuth } from '@/lib/api-utils'
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     // 只有管理员可以查看操作日志
     if (user.role !== 'admin') {

@@ -27,7 +27,7 @@ const backupDataSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     // 只有管理员可以导入备份
     if (user.role !== 'admin') {

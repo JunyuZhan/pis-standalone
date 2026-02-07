@@ -3,7 +3,7 @@
  * GET: 获取备份相关信息和系统统计
  */
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { ApiError, handleApiError, requireAuth } from '@/lib/api-utils'
 
@@ -30,9 +30,9 @@ const BACKUP_TABLES_INFO = {
   collaboration_invites: { name: '协作邀请', description: '协作邀请记录' },
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     // 只有管理员可以查看备份信息
     if (user.role !== 'admin') {

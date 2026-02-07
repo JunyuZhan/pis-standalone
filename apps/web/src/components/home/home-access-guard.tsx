@@ -46,9 +46,14 @@ export function HomeAccessGuard() {
           </div>
           <button
             onClick={() => {
-              // 清除 cookie 并返回上一页
+              // 清除 cookie 并尝试返回上一页，如果没有历史记录则显示提示
               document.cookie = 'pis_share_link_access=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
-              router.back()
+              if (window.history.length > 1) {
+                router.back()
+              } else {
+                // 如果没有历史记录，显示提示
+                alert('请通过分享链接访问相册，或直接访问网站首页。')
+              }
             }}
             className="inline-flex items-center gap-2 px-6 py-3 bg-accent text-background rounded-lg hover:bg-accent/90 transition-colors"
           >

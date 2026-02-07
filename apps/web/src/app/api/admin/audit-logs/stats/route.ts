@@ -25,7 +25,7 @@ interface DateRow {
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     if (user.role !== 'admin') {
       throw new ApiError('无权访问操作日志', 403)

@@ -3,7 +3,7 @@
  * GET: 获取所有权限定义
  */
 
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { ApiError, handleApiError, requireAuth } from '@/lib/api-utils'
 
@@ -15,9 +15,9 @@ interface RolePermissionRow {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     // 只有管理员可以查看权限列表
     if (user.role !== 'admin') {

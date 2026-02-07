@@ -51,7 +51,7 @@ const updateUserPermissionsSchema = z.object({
 
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     if (user.role !== 'admin') {
       throw new ApiError('无权访问权限管理', 403)
@@ -126,7 +126,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     if (user.role !== 'admin') {
       throw new ApiError('无权修改用户权限', 403)

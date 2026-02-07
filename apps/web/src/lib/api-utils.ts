@@ -4,9 +4,9 @@
  * 提供通用的 API 错误处理和认证辅助函数
  */
 
-import { NextResponse } from 'next/server'
-import { headers } from 'next/headers'
-import { verifyToken } from './auth/jwt'
+import { NextRequest, NextResponse } from 'next/server'
+import { getUserFromRequest } from './auth'
+import { createAdminClient } from './database'
 
 // 导出 handleError 从 validation/error-handler
 export { handleError } from './validation/error-handler'
@@ -65,37 +65,45 @@ export function handleApiError(error: unknown): NextResponse {
 /**
  * 获取当前认证用户
  * 用于 API 路由
+ * 从 cookies 中读取认证信息（支持 JWT access token 和 refresh token）
  */
-export async function requireAuth(): Promise<{
+export async function requireAuth(request: NextRequest): Promise<{
   user: {
     id: string
     email: string
     role: string
   }
 }> {
-  const headersList = await headers()
-  const authHeader = headersList.get('authorization')
+  // 从 cookies 中获取用户信息
+  const authUser = await getUserFromRequest(request)
   
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authUser) {
     const error = new Error('未授权访问') as Error & { statusCode: number }
     error.statusCode = 401
     throw error
   }
   
-  const token = authHeader.substring(7)
-  const payload = await verifyToken(token)
+  // 从数据库获取用户角色
+  const db = await createAdminClient()
+  const { data: userData, error: dbError } = await db
+    .from('users')
+    .select('role')
+    .eq('id', authUser.id)
+    .eq('is_active', true)
+    .is('deleted_at', null)
+    .single()
   
-  if (!payload || !payload.sub) {
-    const error = new Error('无效的令牌') as Error & { statusCode: number }
-    error.statusCode = 401
-    throw error
+  if (dbError || !userData) {
+    const authError = new Error('用户不存在或已被禁用') as Error & { statusCode: number }
+    authError.statusCode = 401
+    throw authError
   }
   
   return {
     user: {
-      id: payload.sub,
-      email: payload.email || '',
-      role: (payload as unknown as { role?: string }).role || 'user',
+      id: authUser.id,
+      email: authUser.email,
+      role: (userData as { role: string | null }).role || 'guest',
     },
   }
 }

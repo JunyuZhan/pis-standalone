@@ -45,6 +45,7 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
         logoUrl: undefined,
         opacity: 0.5,
         position: 'bottom-right',
+        size: 24, // 默认字体大小 24px
         margin: 5,
         enabled: true,
       }],
@@ -177,6 +178,7 @@ export function AlbumSettingsForm({ album, coverOriginalKey }: AlbumSettingsForm
       logoUrl: undefined,
       opacity: 0.5,
       position: 'bottom-right',
+      size: 24, // 默认字体大小 24px
       margin: 5,
       enabled: true,
     }

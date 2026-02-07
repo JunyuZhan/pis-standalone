@@ -47,6 +47,7 @@ export function MultiWatermarkManager({ watermarks, onChange }: MultiWatermarkMa
       text: `© ${photographerName}`,
       opacity: 0.5,
       position: 'center',
+      size: 24, // 默认字体大小 24px
       margin: 5,
       enabled: true,
     }
@@ -88,23 +89,6 @@ export function MultiWatermarkManager({ watermarks, onChange }: MultiWatermarkMa
         </button>
       </div>
 
-      {/* 水印预览 */}
-      {watermarks.length > 0 && (
-        <div className="card p-4">
-          <label className="block text-xs font-medium text-text-secondary mb-3">
-            预览效果
-          </label>
-          <div className="flex justify-center">
-            <div className="w-full max-w-[280px]">
-              <WatermarkPreview watermarks={watermarks} width={280} height={210} />
-            </div>
-          </div>
-          <p className="text-xs text-text-muted mt-2 text-center">
-            蓝色圆点标记水印位置，调整设置可实时查看效果
-          </p>
-        </div>
-      )}
-
       {watermarks.length === 0 ? (
         <div className="text-center py-8 border-2 border-dashed border-border rounded-lg">
           <p className="text-text-secondary mb-4">还没有添加水印</p>
@@ -118,8 +102,27 @@ export function MultiWatermarkManager({ watermarks, onChange }: MultiWatermarkMa
           </button>
         </div>
       ) : (
-        <div className="space-y-4">
-          {watermarks.map((watermark, index) => (
+        <div className="flex flex-col lg:flex-row gap-4">
+          {/* 左侧：水印预览 */}
+          <div className="lg:w-80 shrink-0">
+            <div className="card p-4 sticky top-4">
+              <label className="block text-xs font-medium text-text-secondary mb-3">
+                预览效果
+              </label>
+              <div className="flex justify-center">
+                <div className="w-full max-w-[280px]">
+                  <WatermarkPreview watermarks={watermarks} width={280} height={210} />
+                </div>
+              </div>
+              <p className="text-xs text-text-muted mt-2 text-center">
+                蓝色圆点标记水印位置，调整设置可实时查看效果
+              </p>
+            </div>
+          </div>
+
+          {/* 右侧：水印设置列表 */}
+          <div className="flex-1 space-y-4">
+            {watermarks.map((watermark, index) => (
             <div key={watermark.id} className="card p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -201,43 +204,73 @@ export function MultiWatermarkManager({ watermarks, onChange }: MultiWatermarkMa
               </div>
 
               {/* 第二行：滑块控制 */}
-              <div className="flex items-center gap-4 pt-1">
-                <div className="flex-1 flex items-center gap-2">
-                  <span className="text-xs text-text-secondary whitespace-nowrap w-12">
-                    边距 {watermark.margin ?? 5}%
-                  </span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="20"
-                    step="1"
-                    value={watermark.margin ?? 5}
-                    onChange={(e) =>
-                      updateWatermark(watermark.id, { margin: parseInt(e.target.value) })
-                    }
-                    className="w-full h-1.5 accent-accent"
-                  />
+              <div className="flex flex-col gap-3 pt-1">
+                {/* 第一行：大小和边距 */}
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-xs text-text-secondary whitespace-nowrap w-16">
+                      {watermark.type === 'text' ? '字体大小' : 'Logo大小'}
+                    </span>
+                    <input
+                      type="range"
+                      min={watermark.type === 'text' ? 12 : 20}
+                      max={watermark.type === 'text' ? 72 : 200}
+                      step={watermark.type === 'text' ? 2 : 5}
+                      value={watermark.size || (watermark.type === 'text' ? 24 : 50)}
+                      onChange={(e) =>
+                        updateWatermark(watermark.id, { size: parseInt(e.target.value) })
+                      }
+                      className="w-full h-1.5 accent-accent"
+                    />
+                    <span className="text-xs text-text-secondary whitespace-nowrap w-10">
+                      {watermark.size || (watermark.type === 'text' ? 24 : 50)}px
+                    </span>
+                  </div>
+                  
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-xs text-text-secondary whitespace-nowrap w-12">
+                      边距 {watermark.margin ?? 5}%
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="20"
+                      step="1"
+                      value={watermark.margin ?? 5}
+                      onChange={(e) =>
+                        updateWatermark(watermark.id, { margin: parseInt(e.target.value) })
+                      }
+                      className="w-full h-1.5 accent-accent"
+                    />
+                  </div>
                 </div>
                 
-                <div className="flex-1 flex items-center gap-2">
-                  <span className="text-xs text-text-secondary whitespace-nowrap w-12">
-                    透明 {Math.round((watermark.opacity || 0.5) * 100)}%
-                  </span>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="1"
-                    step="0.1"
-                    value={watermark.opacity || 0.5}
-                    onChange={(e) =>
-                      updateWatermark(watermark.id, { opacity: parseFloat(e.target.value) })
-                    }
-                    className="w-full h-1.5 accent-accent"
-                  />
+                {/* 第二行：透明度 */}
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-xs text-text-secondary whitespace-nowrap w-16">
+                      透明度
+                    </span>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="1"
+                      step="0.1"
+                      value={watermark.opacity || 0.5}
+                      onChange={(e) =>
+                        updateWatermark(watermark.id, { opacity: parseFloat(e.target.value) })
+                      }
+                      className="w-full h-1.5 accent-accent"
+                    />
+                    <span className="text-xs text-text-secondary whitespace-nowrap w-10">
+                      {Math.round((watermark.opacity || 0.5) * 100)}%
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
     </div>

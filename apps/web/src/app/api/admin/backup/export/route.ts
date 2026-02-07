@@ -23,7 +23,7 @@ const BACKUP_TABLES = [
 
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
+    const { user } = await requireAuth(request)
     
     // 只有管理员可以导出备份
     if (user.role !== 'admin') {

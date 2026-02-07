@@ -1,4 +1,6 @@
+import Link from 'next/link'
 import { Metadata } from 'next'
+import { ArrowLeft } from 'lucide-react'
 import { AuditLogViewer } from '@/components/admin/audit-log-viewer'
 
 export const metadata: Metadata = {
@@ -8,7 +10,18 @@ export const metadata: Metadata = {
 
 export default function AuditLogsPage() {
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
+      {/* 返回按钮 */}
+      <div className="flex items-center gap-2 text-text-secondary">
+        <Link
+          href="/admin/settings"
+          className="flex items-center gap-1 hover:text-text-primary transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          返回系统设置
+        </Link>
+      </div>
+
       <div>
         <h1 className="text-2xl font-bold">操作日志</h1>
         <p className="text-muted-foreground">
