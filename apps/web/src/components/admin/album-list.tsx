@@ -433,8 +433,9 @@ function AlbumCard({
   const swipeHandlers = useSwipeable({
     onSwiping: (e) => {
       if (selectionMode) return
-      // 只允许左滑（删除）
-      if (e.dir === 'Left' && e.deltaX < 0) {
+      // 只允许明显的水平滑动（水平位移大于垂直位移的2倍）
+      const isHorizontalSwipe = Math.abs(e.deltaX) > Math.abs(e.deltaY) * 2
+      if (e.dir === 'Left' && e.deltaX < 0 && isHorizontalSwipe) {
         setIsSwiping(true)
         setSwipeOffset(Math.max(e.deltaX, -80)) // 最大滑动80px
       }
@@ -455,7 +456,8 @@ function AlbumCard({
     },
     trackMouse: false, // 只在触摸设备上启用
     trackTouch: true,
-    preventScrollOnSwipe: true,
+    preventScrollOnSwipe: false, // 不阻止滚动，让垂直滚动正常工作
+    delta: 30, // 增加触发阈值，避免误触
   })
 
   const CardContent = (
